@@ -17,17 +17,56 @@ const STATIC_WEB_CONTENT_TYPES = new Map([
   ['.woff2', 'font/woff2']
 ])
 
-export function createStaticWebClientHandler(staticRoot: string): RequestListener {
+export type StaticWebClientHandlerOptions = {
+  // Why: when present, GET /trusted-session returns the current pairing offer (loopback-gated) so a reverse-proxy-fronted browser opens the E2EE channel without a URL-fragment token. Returns null when no offer can be minted.
+  trustedSessionProvider?: () => string | null
+}
+
+export function createStaticWebClientHandler(
+  staticRoot: string,
+  options: StaticWebClientHandlerOptions = {}
+): RequestListener {
   const resolvedRoot = resolve(staticRoot)
   return (request, response) => {
-    void handleStaticRequest(resolvedRoot, request, response)
+    void handleStaticRequest(resolvedRoot, request, response, options)
   }
+}
+
+// Why: mirrors code-server's `bind-addr: 127.0.0.1` + `--auth none` trust model — a loopback peer is proof the request arrived through the front proxy (Coder), which already enforced auth. The listener also binds loopback-only in trusted-proxy mode; this is defense in depth.
+function isLoopbackRemote(remoteAddress: string | undefined): boolean {
+  return (
+    remoteAddress === '127.0.0.1' ||
+    remoteAddress === '::1' ||
+    remoteAddress === '::ffff:127.0.0.1'
+  )
+}
+
+function handleTrustedSessionRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  provider: () => string | null
+): void {
+  if (!isLoopbackRemote(request.socket.remoteAddress)) {
+    writeHttpStatus(response, 404)
+    return
+  }
+  const pairingUrl = provider()
+  if (!pairingUrl) {
+    writeHttpStatus(response, 503)
+    return
+  }
+  response.statusCode = 200
+  response.setHeader('Content-Type', 'application/json; charset=utf-8')
+  // Why: the payload carries a device credential; never let a proxy or browser cache it.
+  response.setHeader('Cache-Control', 'no-store')
+  response.end(JSON.stringify({ pairingUrl }))
 }
 
 async function handleStaticRequest(
   staticRoot: string,
   request: IncomingMessage,
-  response: ServerResponse
+  response: ServerResponse,
+  options: StaticWebClientHandlerOptions
 ): Promise<void> {
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     response.setHeader('Allow', 'GET, HEAD')
@@ -38,6 +77,14 @@ async function handleStaticRequest(
   const pathname = parseStaticPathname(request.url)
   if (!pathname) {
     writeHttpStatus(response, 400)
+    return
+  }
+  // Why: match by suffix like the static allowlist below — under a reverse-proxy path prefix the pathname arrives as `/<prefix>/trusted-session`.
+  if (
+    options.trustedSessionProvider &&
+    (pathname === '/trusted-session' || pathname.endsWith('/trusted-session'))
+  ) {
+    handleTrustedSessionRequest(request, response, options.trustedSessionProvider)
     return
   }
   if (!isAllowedStaticWebPath(pathname)) {

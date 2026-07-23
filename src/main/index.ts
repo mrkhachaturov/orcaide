@@ -1485,6 +1485,8 @@ type ServeOptions = {
   mobilePairing: boolean
   recipeJson: boolean
   projectRoot: string | null
+  // Why: reverse-proxy (Coder) front. Bind loopback only and auto-issue the pairing offer over /trusted-session so a proxied browser opens the E2EE channel without a URL-fragment token.
+  trustedProxy: boolean
 }
 
 function getServeOptions(argv = process.argv): ServeOptions {
@@ -1512,7 +1514,8 @@ function getServeOptions(argv = process.argv): ServeOptions {
     noPairing: argv.includes('--serve-no-pairing'),
     mobilePairing: argv.includes('--serve-mobile-pairing'),
     recipeJson: argv.includes('--serve-recipe-json'),
-    projectRoot: valueAfter('--serve-project-root')
+    projectRoot: valueAfter('--serve-project-root'),
+    trustedProxy: argv.includes('--serve-trusted-proxy')
   }
 }
 
@@ -2307,7 +2310,10 @@ app.whenReady().then(async () => {
           preferPinnedWsPort: true
         }
       : {}),
-    webClientRoot: getBundledWebClientRoot()
+    webClientRoot: getBundledWebClientRoot(),
+    ...(serveOptions?.trustedProxy
+      ? { trustedProxy: true, trustedProxyAddress: serveOptions.pairingAddress }
+      : {})
   })
   registerMobileHandlers(runtimeRpc, {
     getRelayStatus: () => desktopRelayStatus,

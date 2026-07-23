@@ -74,6 +74,23 @@ export function decideWebPairingStartup(args: {
     : { kind: 'show-connect', initialPairingInput: null }
 }
 
+// Why: trusted-proxy mode delivers the runtime offer same-origin over loopback instead of the URL fragment. Fetched relative to the page so a reverse-proxy path prefix is preserved. Returns a pairing input string the normal parse path accepts, or null when not behind a trusted proxy.
+export async function fetchTrustedSessionPairingInput(): Promise<string | null> {
+  try {
+    const url = new URL('trusted-session', window.location.href).toString()
+    const response = await fetch(url, { headers: { accept: 'application/json' } })
+    if (!response.ok) {
+      return null
+    }
+    const data = (await response.json()) as { pairingUrl?: unknown }
+    return typeof data.pairingUrl === 'string' && data.pairingUrl.length > 0
+      ? data.pairingUrl
+      : null
+  } catch {
+    return null
+  }
+}
+
 export function clearPairingInputFromAddressBar(): void {
   if (!window.location.hash && !window.location.search) {
     return

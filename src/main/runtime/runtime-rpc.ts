@@ -54,6 +54,10 @@ type OrcaRuntimeRpcServerOptions = {
   // Why: true when the caller pinned a port (`orca serve --port`) so bind order prefers it over a stale STA-1511 fallback (#8535).
   preferPinnedWsPort?: boolean
   webClientRoot?: string
+  // Why: reverse-proxy (Coder) front. Bind loopback only + serve the pairing offer over /trusted-session so a proxied browser opens the E2EE channel without a URL-fragment token. Loopback reachability is the proof the request came through the trusted proxy.
+  trustedProxy?: boolean
+  // Why: client-advertised ws endpoint baked into the trusted-session offer (the reverse-proxy address), since the loopback bind can't advertise itself.
+  trustedProxyAddress?: string | null
   // Why: test-only overrides for the two constants below; production must not pass these (defaults set by §3.1).
   keepaliveIntervalMs?: number
   longPollCap?: number
@@ -427,6 +431,8 @@ export class OrcaRuntimeRpcServer {
   private readonly wsPort: number
   private readonly preferPinnedWsPort: boolean
   private readonly webClientRoot: string | undefined
+  private readonly trustedProxy: boolean
+  private readonly trustedProxyAddress: string | null
   private readonly authToken = randomBytes(24).toString('hex')
   private readonly keepaliveIntervalMs: number
   private readonly longPollCap: number
@@ -461,6 +467,8 @@ export class OrcaRuntimeRpcServer {
     wsPort = DEFAULT_WS_PORT,
     preferPinnedWsPort = false,
     webClientRoot,
+    trustedProxy = false,
+    trustedProxyAddress = null,
     keepaliveIntervalMs = KEEPALIVE_INTERVAL_MS,
     longPollCap = LONG_POLL_CAP
   }: OrcaRuntimeRpcServerOptions) {
@@ -473,6 +481,8 @@ export class OrcaRuntimeRpcServer {
     this.wsPort = wsPort
     this.preferPinnedWsPort = preferPinnedWsPort
     this.webClientRoot = webClientRoot
+    this.trustedProxy = trustedProxy
+    this.trustedProxyAddress = trustedProxyAddress
     this.keepaliveIntervalMs = keepaliveIntervalMs
     this.longPollCap = longPollCap
     this.relayRevokeOutbox = new RelayRevokeOutbox(userDataPath)
@@ -564,6 +574,15 @@ export class OrcaRuntimeRpcServer {
   getWebSocketEndpoint(): string | null {
     const ws = this.transports.find((t) => t.kind === 'websocket')
     return ws?.endpoint ?? null
+  }
+
+  // Why: trusted-proxy web sessions fetch this same-origin over loopback instead of carrying the token in the URL fragment. Returns the same runtime pairing offer the fragment would, so the E2EE handshake is unchanged; the browser just receives the credential from a loopback-gated endpoint rather than the address bar.
+  private buildTrustedSessionOffer(): string | null {
+    const offer = this.createPairingOffer({
+      address: this.trustedProxyAddress,
+      scope: 'runtime'
+    })
+    return offer.available ? offer.pairingUrl : null
   }
 
   createPairingOffer(args: {
@@ -890,9 +909,13 @@ export class OrcaRuntimeRpcServer {
         this.pairingInitializationFailure = null
         try {
           const wsTransport = new WebSocketTransport({
-            host: '0.0.0.0',
+            // Why: trusted-proxy mode binds loopback only, so the only way a packet reaches this port is through the front proxy (Coder), which already enforced auth.
+            host: this.trustedProxy ? '127.0.0.1' : '0.0.0.0',
             port: this.wsPort,
             staticRoot: this.webClientRoot,
+            ...(this.trustedProxy && this.webClientRoot
+              ? { trustedSessionProvider: (): string | null => this.buildTrustedSessionOffer() }
+              : {}),
             // Why: stable fallback port across restarts keeps paired devices' endpoints valid (STA-1511); wsPort 0 = random (E2E).
             ...(this.wsPort !== 0 ? { fallbackPort: readWsFallbackPort(this.userDataPath) } : {}),
             ...(this.preferPinnedWsPort ? { preferPinnedPort: true } : {})

@@ -129,6 +129,7 @@ export const CORE_HANDLERS: Record<string, CommandHandler> = {
       noPairing: flags.get('no-pairing') === true,
       mobilePairing: flags.get('mobile-pairing') === true,
       recipeJson: flags.get('recipe-json') === true,
+      trustedProxy: flags.get('trusted-proxy') === true,
       projectRoot
     })
     process.exitCode = exitCode

@@ -770,7 +770,15 @@ function createWebPreloadApi(): Partial<PreloadApi> {
         }))
     },
     memory: {
-      getSnapshot: () => Promise.resolve(createEmptyMemorySnapshot())
+      // Why: the Resource Manager should show the RUNTIME's processes — its
+      // terminals and agents run on the server, not in this browser. The
+      // server's diagnostics.memory returns the same MemorySnapshot shape the
+      // desktop main builds locally (phones already poll it); fall back to the
+      // empty snapshot only when no environment is connected.
+      getSnapshot: () =>
+        callRuntimeResult<MemorySnapshot>('diagnostics.memory').catch(() =>
+          createEmptyMemorySnapshot()
+        )
     },
     aiVault: createAiVaultApi(),
     preflight: createPreflightApi(),

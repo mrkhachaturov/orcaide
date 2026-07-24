@@ -41,6 +41,8 @@ export type WebSocketTransportOptions = {
   fallbackPort?: number
   // Why: serve --port clients dial the pinned port; prefer it first so a stale fallback can't steal the pin (issue #8535). Default keeps fallback-first (STA-1511).
   preferPinnedPort?: boolean
+  // Why: trusted-proxy mode. Serves the current pairing offer over GET /trusted-session (loopback-gated) so a reverse-proxy-fronted browser opens the E2EE channel without a URL-fragment token. Returns null when no offer can be minted.
+  trustedSessionProvider?: () => string | null
 }
 
 export class WebSocketTransport implements RpcTransport {
@@ -53,6 +55,7 @@ export class WebSocketTransport implements RpcTransport {
   private readonly staticRoot: string | undefined
   private readonly fallbackPort: number | undefined
   private readonly preferPinnedPort: boolean
+  private readonly trustedSessionProvider: (() => string | null) | undefined
   private httpServer: HttpsServer | HttpServer | null = null
   private wss: WebSocketServer | null = null
   private messageHandler: WebSocketMessageHandler | null = null
@@ -74,7 +77,8 @@ export class WebSocketTransport implements RpcTransport {
     preAuthTimeoutMs,
     staticRoot,
     fallbackPort,
-    preferPinnedPort
+    preferPinnedPort,
+    trustedSessionProvider
   }: WebSocketTransportOptions) {
     this.host = host
     this.port = port
@@ -89,6 +93,7 @@ export class WebSocketTransport implements RpcTransport {
     this.staticRoot = staticRoot
     this.fallbackPort = fallbackPort
     this.preferPinnedPort = preferPinnedPort === true
+    this.trustedSessionProvider = trustedSessionProvider
   }
 
   onMessage(handler: WebSocketMessageHandler): void {
@@ -163,7 +168,12 @@ export class WebSocketTransport implements RpcTransport {
 
   private createHttpServer(): HttpServer | HttpsServer {
     const requestListener = this.staticRoot
-      ? createStaticWebClientHandler(this.staticRoot)
+      ? createStaticWebClientHandler(
+          this.staticRoot,
+          this.trustedSessionProvider
+            ? { trustedSessionProvider: this.trustedSessionProvider }
+            : undefined
+        )
       : undefined
     return this.tlsCert && this.tlsKey
       ? createHttpsServer({ cert: this.tlsCert, key: this.tlsKey }, requestListener)

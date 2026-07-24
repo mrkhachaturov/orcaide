@@ -82,6 +82,7 @@ export function serveOrcaApp(
     noPairing?: boolean
     mobilePairing?: boolean
     recipeJson?: boolean
+    trustedProxy?: boolean
     projectRoot?: string | null
   } = {}
 ): Promise<number> {
@@ -105,6 +106,9 @@ export function serveOrcaApp(
   }
   if (args.mobilePairing) {
     childArgs.push('--serve-mobile-pairing')
+  }
+  if (args.trustedProxy) {
+    childArgs.push('--serve-trusted-proxy')
   }
   if (args.recipeJson) {
     if (!args.projectRoot) {

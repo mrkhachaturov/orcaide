@@ -74,6 +74,36 @@ export function decideWebPairingStartup(args: {
     : { kind: 'show-connect', initialPairingInput: null }
 }
 
+// Why: trusted-proxy mode delivers the runtime offer same-origin over loopback instead of the URL fragment. Fetched relative to the page so a reverse-proxy path prefix is preserved. Returns a pairing input string the normal parse path accepts, or null when not behind a trusted proxy.
+export async function fetchTrustedSessionPairingInput(): Promise<string | null> {
+  try {
+    const url = new URL('trusted-session', window.location.href).toString()
+    const response = await fetch(url, { headers: { accept: 'application/json' } })
+    if (!response.ok) {
+      return null
+    }
+    const data = (await response.json()) as { pairingUrl?: unknown }
+    return typeof data.pairingUrl === 'string' && data.pairingUrl.length > 0
+      ? data.pairingUrl
+      : null
+  } catch {
+    return null
+  }
+}
+
+// Why: code-server's proven reverse-proxy rule — the client, not the server, knows the
+// reachable base. A Coder subdomain is `<app>--<workspace>--<owner>.<domain>`, dynamic per
+// workspace name, so the loopback-bound runtime can't advertise it. But the browser already
+// loaded from it: window.location IS the address. In trusted mode keep the offer's E2EE
+// credential (server-authoritative) but dial its endpoint same-origin, so the web client
+// connects back exactly where it loaded from — any workspace name, no --pairing-address needed
+// (the page's directory preserves a reverse-proxy path prefix, mirroring code-server's relativeRoot).
+export function sameOriginWebSocketEndpoint(location: Location): string {
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const basePath = location.pathname.replace(/\/[^/]*$/, '/')
+  return `${protocol}//${location.host}${basePath}`
+}
+
 export function clearPairingInputFromAddressBar(): void {
   if (!window.location.hash && !window.location.search) {
     return

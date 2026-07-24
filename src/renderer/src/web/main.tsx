@@ -1,6 +1,6 @@
 import '../assets/main.css'
 
-import { Suspense, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import { lazyWithRetry as lazy } from '@/lib/lazy-with-retry'
 import ReactDOM from 'react-dom/client'
 import { useTranslation } from 'react-i18next'
@@ -9,7 +9,10 @@ import { RecoverableRenderErrorBoundary } from '../components/error-boundaries/R
 import {
   clearPairingInputFromAddressBar,
   decideWebPairingStartup,
-  readPairingInputFromLocation
+  fetchTrustedSessionPairingInput,
+  parseWebPairingInput,
+  readPairingInputFromLocation,
+  sameOriginWebSocketEndpoint
 } from './web-pairing'
 import {
   createStoredWebRuntimeEnvironment,
@@ -52,6 +55,50 @@ function WebRoot(): React.JSX.Element {
     }
     return startupDecision.kind === 'use-stored-environment'
   })
+  // Why: trusted-proxy mode — no fragment offer and no stored environment means we
+  // may be behind a reverse proxy (Coder) that serves the offer over /trusted-session.
+  // Probe it before falling back to the manual connect form, so a proxied browser
+  // pairs itself with no URL token.
+  const [trustedProbe, setTrustedProbe] = useState<'pending' | 'done'>(() =>
+    !hasEnvironment &&
+    startupDecision.kind === 'show-connect' &&
+    startupDecision.initialPairingInput === null
+      ? 'pending'
+      : 'done'
+  )
+  useEffect(() => {
+    if (trustedProbe !== 'pending') {
+      return
+    }
+    let active = true
+    void fetchTrustedSessionPairingInput().then((input) => {
+      if (!active) {
+        return
+      }
+      const offer = input ? parseWebPairingInput(input) : null
+      if (offer && offer.scope === 'runtime') {
+        saveStoredWebRuntimeEnvironment(
+          createStoredWebRuntimeEnvironment({
+            name: 'Orca Server',
+            // Why: keep the server's E2EE credential but dial same-origin — the browser
+            // loaded from the correct Coder subdomain, so window.location is the reachable
+            // address for any workspace name, with no --pairing-address to misconfigure.
+            offer: { ...offer, endpoint: sameOriginWebSocketEndpoint(window.location) },
+            previousEnvironment: readStoredWebRuntimeEnvironment()
+          })
+        )
+        setHasEnvironment(true)
+      }
+      setTrustedProbe('done')
+    })
+    return () => {
+      active = false
+    }
+  }, [trustedProbe])
+
+  if (!hasEnvironment && trustedProbe === 'pending') {
+    return <div className="min-h-dvh bg-background" />
+  }
 
   if (!hasEnvironment) {
     return (

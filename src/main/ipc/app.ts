@@ -314,6 +314,10 @@ export function registerAppHandlers(store: Store, options: RegisterAppHandlersOp
   ipcMain.handle('app:pickFloatingWorkspaceDirectory', (event) =>
     pickFloatingWorkspaceDirectory(event, store)
   )
+
+  ipcMain.handle('app:grantFloatingWorkspaceDirectory', (_event, dirPath: string) =>
+    grantFloatingWorkspaceDirectory(store, dirPath)
+  )
 }
 
 async function runBeforeRelaunchCleanup(

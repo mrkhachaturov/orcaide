@@ -473,6 +473,8 @@ const api = {
       ipcRenderer.invoke('app:pickFloatingMarkdownDocument'),
     pickFloatingWorkspaceDirectory: (): Promise<string | null> =>
       ipcRenderer.invoke('app:pickFloatingWorkspaceDirectory'),
+    grantFloatingWorkspaceDirectory: (dirPath: string): Promise<void> =>
+      ipcRenderer.invoke('app:grantFloatingWorkspaceDirectory', dirPath),
     writeTerminalRenderDesyncEvidence: (args: WriteTerminalRenderDesyncEvidenceArgs) =>
       ipcRenderer.invoke('terminal:writeRenderDesyncEvidence', args)
   },

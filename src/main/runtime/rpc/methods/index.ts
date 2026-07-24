@@ -39,6 +39,7 @@ import { PAIRING_METHODS } from './pairing'
 import { MOBILE_PAIRING_METHODS } from './mobile-pairing'
 import { UPDATER_METHODS } from './updater'
 import { CLI_METHODS } from './cli'
+import { FLOATING_WORKSPACE_METHODS } from './floating-workspace'
 import { AGENT_SESSION_METHODS } from './agent-session'
 
 // Why: a flat manifest keeps registration order explicit and provides one
@@ -85,5 +86,6 @@ export const ALL_RPC_METHODS: readonly RpcAnyMethod[] = [
   ...PAIRING_METHODS,
   ...MOBILE_PAIRING_METHODS,
   ...UPDATER_METHODS,
-  ...CLI_METHODS
+  ...CLI_METHODS,
+  ...FLOATING_WORKSPACE_METHODS
 ]

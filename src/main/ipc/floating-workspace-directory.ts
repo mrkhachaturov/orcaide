@@ -3,10 +3,19 @@ import { access, mkdir, realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { app } from 'electron'
 import type { GlobalSettings, FloatingTerminalCwdRequest } from '../../shared/types'
-import type { Store } from '../persistence'
 import { authorizeExternalPath } from './filesystem-auth'
 
 const FLOATING_WORKSPACE_DIRNAME = 'floating-workspace'
+
+// Why: these helpers only ever read settings and persist the trusted-directory
+// grant list, so they depend on this minimal surface rather than the full
+// desktop `Store`. That lets the runtime server reuse them behind an adapter
+// over its own settings store (web client parity) — the desktop `Store` remains
+// structurally assignable, so its callers are unchanged.
+export interface FloatingWorkspaceDirectoryStore {
+  getSettings(): GlobalSettings
+  updateSettings(updates: Partial<GlobalSettings>): void
+}
 
 function expandHomePath(input: string, home: string): string {
   if (input === '~') {
@@ -77,7 +86,7 @@ export async function ensureDefaultFloatingWorkspacePath(): Promise<string> {
 }
 
 export async function resolveFloatingTerminalCwd(
-  store: Store,
+  store: FloatingWorkspaceDirectoryStore,
   args?: FloatingTerminalCwdRequest
 ): Promise<string> {
   const configuredPath = typeof args?.path === 'string' ? args.path.trim() : ''
@@ -104,7 +113,7 @@ export async function resolveFloatingTerminalCwd(
 }
 
 export async function grantFloatingWorkspaceDirectory(
-  store: Store,
+  store: FloatingWorkspaceDirectoryStore,
   dirPath: string
 ): Promise<void> {
   const resolvedDir = resolveFloatingWorkspaceInput(dirPath)
@@ -123,7 +132,7 @@ export async function grantFloatingWorkspaceDirectory(
 }
 
 export async function sanitizeFloatingWorkspaceDirectorySetting(
-  store: Store,
+  store: FloatingWorkspaceDirectoryStore,
   dirPath: string
 ): Promise<string> {
   const trimmed = dirPath.trim()

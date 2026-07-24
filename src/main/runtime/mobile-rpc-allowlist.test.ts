@@ -183,4 +183,28 @@ describe('mobile RPC allowlist', () => {
     )
     expect(missing).toEqual([])
   })
+
+  it('does not grant mobile credentials control over floating-workspace directories', () => {
+    // Why: floatingWorkspace.resolveCwd authorizes an external path and
+    // grantDirectory writes a trusted-directory grant into settings — both are
+    // host mutations. Only the runtime-scope web tile (whose floating terminals
+    // run on the host) may resolve/grant; a paired phone must not.
+    const allowed = mobileRpcAllowlist()
+    expect(
+      ['floatingWorkspace.resolveCwd', 'floatingWorkspace.grantDirectory'].filter((method) =>
+        allowed.has(method)
+      )
+    ).toEqual([])
+  })
+
+  it('registers the runtime-only floating-workspace directory methods', () => {
+    // Why: the web client routes the Terminal Directory picker + terminal cwd
+    // through these; dropping one from ALL_RPC_METHODS silently reverts the
+    // picker to a no-op that never applies the chosen path.
+    const registered = registeredRuntimeMethods()
+    const missing = ['floatingWorkspace.resolveCwd', 'floatingWorkspace.grantDirectory'].filter(
+      (method) => !registered.has(method)
+    )
+    expect(missing).toEqual([])
+  })
 })

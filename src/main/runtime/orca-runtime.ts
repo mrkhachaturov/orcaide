@@ -117,6 +117,7 @@ import type {
   GitHubCreateIssueFields,
   GitHubOwnerRepo,
   GlobalSettings,
+  FloatingTerminalCwdRequest,
   PersistedUIState,
   Project,
   ProjectUpdateArgs,
@@ -765,6 +766,11 @@ import {
 } from '../git/worktree'
 import type { AddWorktreeOptions, AddWorktreeResult } from '../git/worktree'
 import { isENOENT } from '../ipc/filesystem-auth'
+import {
+  resolveFloatingTerminalCwd as resolveFloatingTerminalCwdOnHost,
+  grantFloatingWorkspaceDirectory as grantFloatingWorkspaceDirectoryOnHost,
+  type FloatingWorkspaceDirectoryStore
+} from '../ipc/floating-workspace-directory'
 import {
   createSetupRunnerScript,
   getDefaultTabCommandTrustContent,
@@ -15182,6 +15188,32 @@ export class OrcaRuntimeService {
       throw new Error('Project path must be an absolute path')
     }
     return scanNestedRepos({ path, options: { timeoutMs: 15_000 } })
+  }
+
+  // Why: the floating-workspace directory helpers trust-check, resolve, and
+  // authorize against the persisted settings on THIS host. Exposed over runtime
+  // RPC so the web client (whose floating terminals run on the server) resolves
+  // the terminal cwd and records picker-approved grants here, exactly like the
+  // desktop app:getFloatingTerminalCwd handler and the native picker's grant.
+  private floatingWorkspaceDirectoryStore(): FloatingWorkspaceDirectoryStore {
+    const store = this.store
+    return {
+      // RuntimeStore narrows getSettings()'s type, but the runtime returns the
+      // full persisted settings object; the helpers only read
+      // floatingTerminalTrustedCwds, which lives on it.
+      getSettings: () => (store?.getSettings?.() ?? {}) as unknown as GlobalSettings,
+      updateSettings: (updates) => {
+        store?.updateSettings?.(updates)
+      }
+    }
+  }
+
+  async resolveFloatingTerminalCwd(args?: FloatingTerminalCwdRequest): Promise<string> {
+    return resolveFloatingTerminalCwdOnHost(this.floatingWorkspaceDirectoryStore(), args)
+  }
+
+  async grantFloatingWorkspaceDirectory(dirPath: string): Promise<void> {
+    await grantFloatingWorkspaceDirectoryOnHost(this.floatingWorkspaceDirectoryStore(), dirPath)
   }
 
   async browseServerDir(pathValue: string): Promise<{ resolvedPath: string; entries: DirEntry[] }> {

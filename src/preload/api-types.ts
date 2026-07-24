@@ -962,6 +962,10 @@ export type AppApi = {
   /** Opens a native directory picker and authorizes the selected directory
    *  for Floating Workspace markdown file creation. */
   pickFloatingWorkspaceDirectory: () => Promise<string | null>
+  /** Authorizes an already-chosen directory (e.g. from the web client's in-app
+   *  host-fs browser, which has no native picker) as a Floating Workspace trust
+   *  grant — the same grant the native picker records. */
+  grantFloatingWorkspaceDirectory: (dirPath: string) => Promise<void>
   /** Persists flag-gated terminal render evidence under app-owned userData. */
   writeTerminalRenderDesyncEvidence: (
     args: WriteTerminalRenderDesyncEvidenceArgs

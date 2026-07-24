@@ -35,7 +35,8 @@ import type {
   WorktreeLineage,
   WorkspaceLineage,
   WorkspaceSessionPatch,
-  WorkspaceSessionState
+  WorkspaceSessionState,
+  FloatingTerminalCwdRequest
 } from '../../../shared/types'
 import type { CliInstallStatus } from '../../../shared/cli-install-types'
 import type { SkillDiscoveryResult } from '../../../shared/skills'
@@ -529,10 +530,29 @@ function createWebPreloadApi(): Partial<PreloadApi> {
       startupDiagnostic: () => Promise.resolve(),
       getKeyboardInputSourceId: () => Promise.resolve(null),
       setUnreadDockBadgeCount: () => Promise.resolve(),
-      getFloatingTerminalCwd: () => Promise.resolve(''),
+      // Why: the floating terminals run on the connected SERVER, so its cwd must
+      // resolve there (expand `~`, trust-check, authorize) — the same resolution
+      // the desktop app:getFloatingTerminalCwd does locally. Route to the server;
+      // fall back to '' (home) only when no environment is connected or on a
+      // transient failure, matching the previous stub's safe default.
+      getFloatingTerminalCwd: (args?: FloatingTerminalCwdRequest) =>
+        requireActiveEnvironmentOrNull()
+          ? callRuntimeResult<string>('floatingWorkspace.resolveCwd', args).catch(() => '')
+          : Promise.resolve(''),
       getFloatingMarkdownDirectory: () => Promise.resolve(''),
       pickFloatingMarkdownDocument: () => Promise.resolve(null),
+      // Why: the web tile has no native OS dialog — the picker is the in-app
+      // host-fs browser (RemoteFileBrowser), so this native entry stays a no-op.
       pickFloatingWorkspaceDirectory: () => Promise.resolve(null),
+      // Why: a browser-picked directory must be trusted/authorized on the SERVER
+      // host (its floating terminals + note creation run there), mirroring the
+      // grant the desktop native picker records. Runtime-scope only.
+      grantFloatingWorkspaceDirectory: (dirPath: string) =>
+        requireActiveEnvironmentOrNull()
+          ? callRuntimeResult<{ ok: boolean }>('floatingWorkspace.grantDirectory', {
+              path: dirPath
+            }).then(() => undefined)
+          : Promise.resolve(),
       // Browser fallback has no app-owned userData dir; reject so the sentinel can't claim sensitive evidence was persisted.
       writeTerminalRenderDesyncEvidence: () =>
         Promise.reject(

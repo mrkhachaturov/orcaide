@@ -8,6 +8,7 @@ import { MobilePairingConnectionOptions } from '../settings/MobilePairingConnect
 import { MobileRelayBetaNotice } from '../settings/MobileRelayBetaNotice'
 import { getChannelTagline, type InstallCopy, type IosChannel } from './mobile-platform-copy'
 import { WindowsFirewallNotice } from './WindowsFirewallNotice'
+import { isWebClientLocation } from '@/lib/web-client-location'
 import type { MobilePairingConnectionMode } from '../../../../shared/mobile-pairing-connection-mode'
 export { HeroIntro } from './MobileHeroIntro'
 export { HeroPaired, type PairedDevice } from './MobileHeroPairedDevices'
@@ -305,36 +306,44 @@ export function HeroFlow({
               ) : null}
             </div>
             <div className="mp-pairing-controls">
-              <div className="mp-network-row">
-                <span className="mp-network-label">
-                  {translate('auto.components.mobile.MobileHero.dfd2aa9d5d', 'Network')}
-                </span>
-                <NetworkInterfacePicker
-                  networkInterfaces={networkInterfaces}
-                  selectedAddress={selectedAddress}
-                  onSelectedAddressChange={onSelectedAddressChange}
-                  // Why: direct-first and local-only pairing both advertise a
-                  // local route; keeping it visible also prevents mode shifts.
-                  disabled={false}
-                  className="mp-network-select"
-                />
-                <button
-                  type="button"
-                  className={cn('mp-network-refresh', refreshingNetworkInterfaces && 'is-spinning')}
-                  onClick={onRefreshNetworkInterfaces}
-                  disabled={refreshingNetworkInterfaces}
-                  aria-label={translate(
-                    'auto.components.mobile.MobileHero.85067b9e06',
-                    'Refresh network interfaces'
-                  )}
-                  title={translate(
-                    'auto.components.mobile.MobileHero.85067b9e06',
-                    'Refresh network interfaces'
-                  )}
-                >
-                  <RefreshCw className="size-3.5" />
-                </button>
-              </div>
+              {/* Why: through a trusted proxy the advertised address is fixed
+                  server-side; the host's interfaces are never phone-reachable,
+                  so the picker would only offer wrong answers. */}
+              {isWebClientLocation() ? null : (
+                <div className="mp-network-row">
+                  <span className="mp-network-label">
+                    {translate('auto.components.mobile.MobileHero.dfd2aa9d5d', 'Network')}
+                  </span>
+                  <NetworkInterfacePicker
+                    networkInterfaces={networkInterfaces}
+                    selectedAddress={selectedAddress}
+                    onSelectedAddressChange={onSelectedAddressChange}
+                    // Why: direct-first and local-only pairing both advertise a
+                    // local route; keeping it visible also prevents mode shifts.
+                    disabled={false}
+                    className="mp-network-select"
+                  />
+                  <button
+                    type="button"
+                    className={cn(
+                      'mp-network-refresh',
+                      refreshingNetworkInterfaces && 'is-spinning'
+                    )}
+                    onClick={onRefreshNetworkInterfaces}
+                    disabled={refreshingNetworkInterfaces}
+                    aria-label={translate(
+                      'auto.components.mobile.MobileHero.85067b9e06',
+                      'Refresh network interfaces'
+                    )}
+                    title={translate(
+                      'auto.components.mobile.MobileHero.85067b9e06',
+                      'Refresh network interfaces'
+                    )}
+                  >
+                    <RefreshCw className="size-3.5" />
+                  </button>
+                </div>
+              )}
 
               <div className="mp-inline-actions">
                 <span className="mp-action-divider">

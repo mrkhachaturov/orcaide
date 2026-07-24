@@ -133,6 +133,19 @@ describe('mobile RPC allowlist', () => {
     expect(missing).toEqual([])
   })
 
+  it('does not grant mobile credentials the trusted pairing mint/revoke methods', () => {
+    // Why: mobile.createPairingOffer mints a NEW device credential; a paired
+    // phone reaching it would be privilege escalation (phone → fresh runtime
+    // credential family). The transport also gates on connection scope, but the
+    // allowlist is the first line and must never regress.
+    const allowed = mobileRpcAllowlist()
+    expect(
+      ['mobile.createPairingOffer', 'mobile.listDevices', 'mobile.revokeDevice'].filter((method) =>
+        allowed.has(method)
+      )
+    ).toEqual([])
+  })
+
   it('does not grant mobile credentials control over host updates', () => {
     const allowed = mobileRpcAllowlist()
     expect(

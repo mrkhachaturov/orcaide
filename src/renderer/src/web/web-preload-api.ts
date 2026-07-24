@@ -13,6 +13,8 @@ import type {
   AiVaultPrepareSessionResumeResult
 } from '../../../shared/ai-vault-resume-preparation'
 import { buildNativeChatUnsubscribe } from '../../../shared/native-chat-stream-unsubscribe'
+import QRCodeBrowser from 'qrcode/lib/browser'
+import type { MobilePairingConnectionMode } from '../../../shared/mobile-pairing-connection-mode'
 import type {
   ComputerUsePermissionSetupResult,
   ComputerUsePermissionStatusResult
@@ -818,14 +820,58 @@ function createWebPreloadApi(): Partial<PreloadApi> {
       transferPaneAuthority: () => {}
     },
     mobile: {
+      // Why: a proxied workspace's own interfaces are never phone-reachable;
+      // the server-configured advertised address is the only one that matters,
+      // so the web client neither enumerates nor selects interfaces.
       listNetworkInterfaces: () => Promise.resolve({ interfaces: [] }),
-      getPairingQR: () => Promise.resolve({ available: false }),
+      getPairingQR: async (args?: {
+        address?: string
+        connectionMode?: MobilePairingConnectionMode
+        rotate?: boolean
+      }) => {
+        // Why: address/connectionMode are server policy in web mode
+        // (serve --pairing-address, local-only) and are intentionally not
+        // forwarded; the runtime rejects caller-selected addresses.
+        const offer = await callRuntimeResult<
+          | { available: false; reason?: string; guidance?: string }
+          | {
+              available: true
+              pairingUrl: string
+              endpoint: string
+              deviceId: string
+              connectionMode: MobilePairingConnectionMode
+            }
+        >('mobile.createPairingOffer', args?.rotate ? { rotate: true } : {})
+        if (!offer.available) {
+          console.warn('[mobile] pairing offer unavailable:', offer.reason, offer.guidance)
+          return { available: false as const }
+        }
+        // Why: desktop renders the QR in the main process; web renders it
+        // client-side with the same qrcode package and parameters.
+        const qrDataUrl: string = await QRCodeBrowser.toDataURL(offer.pairingUrl, {
+          errorCorrectionLevel: 'M',
+          margin: 2,
+          width: 256
+        })
+        return {
+          available: true as const,
+          qrDataUrl,
+          pairingUrl: offer.pairingUrl,
+          endpoint: offer.endpoint,
+          deviceId: offer.deviceId,
+          connectionMode: offer.connectionMode
+        }
+      },
       getWindowsFirewallStatus: () => Promise.resolve({ supported: false }),
       repairWindowsFirewall: () => Promise.resolve({ ok: false, reason: 'unsupported' }),
       openWindowsNetworkSettings: () => Promise.resolve(false),
       getRuntimePairingUrl: () => Promise.resolve({ available: false }),
-      listDevices: () => Promise.resolve({ devices: [] }),
-      revokeDevice: () => Promise.resolve({ revoked: false }),
+      listDevices: () =>
+        callRuntimeResult<{
+          devices: { deviceId: string; name: string; pairedAt: number; lastSeenAt: number }[]
+        }>('mobile.listDevices').catch(() => ({ devices: [] })),
+      revokeDevice: (args: { deviceId: string }) =>
+        callRuntimeResult<{ revoked: boolean }>('mobile.revokeDevice', args),
       listRuntimeAccessGrants: () => Promise.resolve({ grants: [] }),
       revokeRuntimeAccess: () => Promise.resolve({ revoked: false }),
       isWebSocketReady: () =>

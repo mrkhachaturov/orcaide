@@ -25,6 +25,7 @@ import {
   type MobilePairingConnectionMode
 } from '../../../../shared/mobile-pairing-connection-mode'
 import { useMobilePairingConnectionMode } from '../mobile/use-mobile-pairing-connection-mode'
+import { pairingUnavailableMessage } from '../mobile/use-mobile-pairing-generation'
 export { getMobilePaneSearchEntries } from './mobile-pane-search'
 
 export function MobilePane(): React.JSX.Element {
@@ -202,12 +203,7 @@ export function MobilePane(): React.JSX.Element {
           }
         } else {
           if (mountedRef.current) {
-            toast.error(
-              translate(
-                'auto.components.settings.MobilePane.cb9067c1c1',
-                'WebSocket transport is not running'
-              )
-            )
+            toast.error(pairingUnavailableMessage())
           }
         }
       } catch {

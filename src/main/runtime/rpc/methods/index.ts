@@ -36,6 +36,7 @@ import { CLIPBOARD_METHODS } from './clipboard'
 import { HOST_CAPABILITY_METHODS } from './host-capabilities'
 import { EMULATOR_METHODS } from './emulator'
 import { PAIRING_METHODS } from './pairing'
+import { MOBILE_PAIRING_METHODS } from './mobile-pairing'
 import { UPDATER_METHODS } from './updater'
 import { AGENT_SESSION_METHODS } from './agent-session'
 
@@ -81,5 +82,6 @@ export const ALL_RPC_METHODS: readonly RpcAnyMethod[] = [
   ...CLIENT_UI_METHODS,
   ...EMULATOR_METHODS,
   ...PAIRING_METHODS,
+  ...MOBILE_PAIRING_METHODS,
   ...UPDATER_METHODS
 ]

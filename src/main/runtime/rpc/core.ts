@@ -14,6 +14,27 @@ export type PairingRpcContext = {
   provisionRelay(params: PairingProvisionRelayParams): Promise<DeviceCredentialInstalled>
 }
 
+export type TrustedMobilePairingOfferResult =
+  | { available: false; reason: string; guidance: string }
+  | {
+      available: true
+      pairingUrl: string
+      endpoint: string
+      deviceId: string
+      connectionMode: 'automatic' | 'local-only'
+    }
+
+// Why: mirrors the mobile: IPC handlers for web clients that have no Electron
+// IPC. The transport injects this only for runtime-scope connections, so a
+// paired phone (mobile scope) can never mint or revoke device credentials.
+export type TrustedMobilePairingRpcContext = {
+  createOffer(params: { rotate?: boolean }): Promise<TrustedMobilePairingOfferResult>
+  listDevices(): {
+    devices: { deviceId: string; name: string; pairedAt: number; lastSeenAt: number }[]
+  }
+  revokeDevice(deviceId: string): Promise<{ revoked: boolean }>
+}
+
 export type RpcEnvelopeMeta = {
   runtimeId: string
 }
@@ -61,6 +82,8 @@ export type RpcContext = {
   // Why: lets handlers gate mobile payload truncation to phones only; undefined for in-process callers → treat as full-class (no clip).
   clientKind?: 'mobile' | 'runtime'
   pairing?: PairingRpcContext
+  // Why: present only for runtime-scope WebSocket connections (see handleWebSocketMessage); its absence is the authorization gate for mobile.* pairing methods.
+  trustedMobilePairing?: TrustedMobilePairingRpcContext
   // Why: mobile terminal traffic bypasses JSON streaming; undefined on Unix/socket and non-E2EE WebSocket paths.
   sendBinary?: (bytes: Uint8Array<ArrayBufferLike>) => boolean | void
   // Why: binary terminal frames arrive outside JSON-RPC once a stream is established; handlers register only the stream IDs they created.

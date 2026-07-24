@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useAppStore } from '@/store'
+import { isWebClientLocation } from '@/lib/web-client-location'
 import {
   resolveMobilePairingConnectionMode,
   type MobilePairingConnectionMode
@@ -22,5 +23,12 @@ export function useMobilePairingConnectionMode(): [
   useEffect(() => {
     setConnectionMode(resolveMobilePairingConnectionMode(savedConnectionMode))
   }, [savedConnectionMode])
+  // Why: a web session reaches the runtime through the server's advertised URL —
+  // there is no Relay provider and no interface choice, so the path is always
+  // local-only. Pinning it here (constant for the page's lifetime) keeps every
+  // mint honest and Generate enabled regardless of desktop sign-in state.
+  if (isWebClientLocation()) {
+    return ['local-only', () => {}]
+  }
   return [connectionMode, setConnectionMode]
 }

@@ -1,10 +1,23 @@
 import { useCallback } from 'react'
 import { toast } from 'sonner'
 import { translate } from '@/i18n/i18n'
+import { isWebClientLocation } from '@/lib/web-client-location'
 import {
   canMintMobilePairingOffer,
   type MobilePairingConnectionMode
 } from '../../../../shared/mobile-pairing-connection-mode'
+
+// Why: "WebSocket transport is not running" is the desktop diagnosis; in the
+// web client an unavailable offer almost always means the server was started
+// without an advertised pairing address (serve --pairing-address).
+export function pairingUnavailableMessage(): string {
+  return isWebClientLocation()
+    ? translate(
+        'auto.components.mobile.MobilePage.webPairingUnavailable',
+        'Pairing isn’t available on this server — it has no advertised pairing address.'
+      )
+    : translate('auto.components.mobile.MobilePage.b353e18de1', 'WebSocket transport is not running')
+}
 
 type MutableRef<T> = { current: T }
 
@@ -89,12 +102,7 @@ export function useMobilePairingGeneration(params: {
             setPairQrDataUrl(null)
             setPairingUrl(null)
             setEncodedConnectionMode(null)
-            toast.error(
-              translate(
-                'auto.components.mobile.MobilePage.b353e18de1',
-                'WebSocket transport is not running'
-              )
-            )
+            toast.error(pairingUnavailableMessage())
           }
         }
       } catch {

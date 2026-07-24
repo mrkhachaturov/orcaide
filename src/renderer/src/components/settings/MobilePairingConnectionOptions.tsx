@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Globe, Loader2 } from 'lucide-react'
 import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import { translate } from '../../i18n/i18n'
 import { useAppStore } from '../../store'
 import { cn } from '@/lib/utils'
+import { isWebClientLocation } from '@/lib/web-client-location'
 import type { MobileRelayStatus } from '../../../../shared/mobile-relay-status'
 import type { MobilePairingConnectionMode } from '../../../../shared/mobile-pairing-connection-mode'
 
@@ -101,15 +102,48 @@ function PathOption({
   )
 }
 
-export function MobilePairingConnectionOptions({
-  value,
-  onChange,
-  compact = false
-}: {
+type MobilePairingConnectionOptionsProps = {
   value: MobilePairingConnectionMode
   onChange: (value: MobilePairingConnectionMode) => void
   compact?: boolean
-}): React.JSX.Element {
+}
+
+// Why: a proxied web session has exactly one path — the server's advertised
+// public URL. Showing Relay/Local-network options (or an interface picker)
+// would mislabel how the code actually connects, so replace the chooser with
+// an explanation of the one real path.
+function WebPairingPathNotice(): React.JSX.Element {
+  return (
+    <div
+      className="flex items-start gap-2.5 rounded-md border border-border px-3 py-2.5"
+      data-testid="web-pairing-path-notice"
+    >
+      <Globe className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+        {translate(
+          'auto.components.settings.MobilePairingConnectionOptions.webPathNotice',
+          'The code connects your phone through this workspace’s web address, so it works from cellular or any network. If the address stops working (for example after your session expires), regenerate the code and scan again.'
+        )}
+      </p>
+    </div>
+  )
+}
+
+export function MobilePairingConnectionOptions(
+  props: MobilePairingConnectionOptionsProps
+): React.JSX.Element {
+  // Why: constant for the page's lifetime, so branching before hooks is safe.
+  if (isWebClientLocation()) {
+    return <WebPairingPathNotice />
+  }
+  return <DesktopMobilePairingConnectionOptions {...props} />
+}
+
+function DesktopMobilePairingConnectionOptions({
+  value,
+  onChange,
+  compact = false
+}: MobilePairingConnectionOptionsProps): React.JSX.Element {
   const authStatus = useAppStore((state) => state.orcaProfileAuthStatus)
   const connecting = useAppStore((state) => state.orcaProfileConnecting)
   const connect = useAppStore((state) => state.connectCurrentOrcaProfile)

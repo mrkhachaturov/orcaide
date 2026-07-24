@@ -11,6 +11,7 @@ import {
   type RpcAnyMethod,
   type RpcEnvelopeMeta,
   type PairingRpcContext,
+  type TrustedMobilePairingRpcContext,
   type RpcRegistry,
   type RpcRequest,
   type RpcResponse
@@ -105,6 +106,7 @@ export class RpcDispatcher {
       pairedDeviceId?: string
       clientKind?: 'mobile' | 'runtime'
       pairing?: PairingRpcContext
+      trustedMobilePairing?: TrustedMobilePairingRpcContext
       sendBinary?: (bytes: Uint8Array<ArrayBufferLike>) => boolean | void
       registerBinaryStreamHandler?: (
         streamId: number,
@@ -140,6 +142,7 @@ export class RpcDispatcher {
           pairedDeviceId: options?.pairedDeviceId,
           clientKind: options?.clientKind,
           pairing: options?.pairing,
+          trustedMobilePairing: options?.trustedMobilePairing,
           sendBinary: options?.sendBinary,
           registerBinaryStreamHandler: options?.registerBinaryStreamHandler
         })
@@ -176,6 +179,7 @@ export class RpcDispatcher {
           pairedDeviceId: options?.pairedDeviceId,
           clientKind: options?.clientKind,
           pairing: options?.pairing,
+          trustedMobilePairing: options?.trustedMobilePairing,
           sendBinary: options?.sendBinary,
           registerBinaryStreamHandler: options?.registerBinaryStreamHandler
         },

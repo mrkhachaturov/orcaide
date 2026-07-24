@@ -7,7 +7,11 @@ import type { RuntimeMetadata, RuntimeTransportMetadata } from '../../shared/run
 import type { OrcaRuntimeService } from './orca-runtime'
 import { writeRuntimeMetadata } from './runtime-metadata'
 import { RpcDispatcher } from './rpc/dispatcher'
-import type { RpcRequest, RpcResponse } from './rpc/core'
+import type {
+  RpcRequest,
+  RpcResponse,
+  TrustedMobilePairingRpcContext
+} from './rpc/core'
 import { errorResponse } from './rpc/errors'
 import type { RpcMessageContext, RpcTransport } from './rpc/transport'
 import { UnixSocketTransport } from './rpc/unix-socket-transport'
@@ -736,6 +740,47 @@ export class OrcaRuntimeRpcServer {
     }
   }
 
+  // Why: the web client's Settings → Mobile mints through runtime RPC (it has no
+  // Electron IPC). The advertised address is fixed server-side (--pairing-address,
+  // e.g. the reverse proxy's public URL) because the host's own interfaces are
+  // never phone-reachable through a proxy; connection mode is pinned local-only —
+  // headless serve has no Relay provider, and the proxy already covers "anywhere".
+  private buildTrustedMobilePairingContext(): TrustedMobilePairingRpcContext {
+    return {
+      createOffer: async ({ rotate }) => {
+        const offer = await this.createMobilePairingOffer({
+          address: this.trustedProxyAddress,
+          connectionMode: 'local-only',
+          rotate,
+          name: `Mobile ${new Date().toLocaleDateString()}`
+        })
+        if (!offer.available) {
+          return { available: false, reason: offer.reason, guidance: offer.guidance }
+        }
+        return {
+          available: true,
+          pairingUrl: offer.pairingUrl,
+          endpoint: offer.endpoint,
+          deviceId: offer.deviceId,
+          connectionMode: offer.connectionMode
+        }
+      },
+      listDevices: () => ({
+        // Why: mirror mobile:listDevices — lastSeenAt === 0 entries were minted
+        // for a QR but never scanned; showing them as paired is misleading.
+        devices: (this.deviceRegistry?.listDevices() ?? [])
+          .filter((d) => d.scope === 'mobile' && d.lastSeenAt > 0)
+          .map((d) => ({
+            deviceId: d.deviceId,
+            name: d.name,
+            pairedAt: d.pairedAt,
+            lastSeenAt: d.lastSeenAt
+          }))
+      }),
+      revokeDevice: async (deviceId) => ({ revoked: await this.revokeMobileDevice(deviceId) })
+    }
+  }
+
   private queueRelayDeviceRevoke(binding: RelayDeviceBinding): void {
     const item = this.relayRevokeOutbox.enqueue(binding)
     this.mobileRelayPairingProvider?.onDeviceRevokeQueued(item)
@@ -1220,6 +1265,10 @@ export class OrcaRuntimeRpcServer {
         // Why: gates the mobile-only payload diet so full-screen web/desktop clients aren't truncated.
         clientKind: device.scope,
         pairing: pairingContext,
+        // Why: scope check, not just authentication — a paired phone (mobile
+        // scope) must never mint new device credentials or revoke siblings.
+        trustedMobilePairing:
+          device.scope === 'runtime' ? this.buildTrustedMobilePairingContext() : undefined,
         signal: abortRegistration?.signal,
         sendBinary,
         registerBinaryStreamHandler: (streamId, handler) =>

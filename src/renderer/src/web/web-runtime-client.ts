@@ -90,7 +90,11 @@ export class WebRuntimeClient {
   private readonly waiters: { resolve: () => void; reject: (error: Error) => void }[] = []
   private readonly serverPublicKey: Uint8Array
 
-  constructor(private readonly pairing: WebPairingOffer) {
+  constructor(
+    private readonly pairing: WebPairingOffer,
+    // Why: trusted-proxy recovery needs to observe the auth-failed transition — the client owns the socket state machine, but only the environment layer can re-fetch /trusted-session and swap the stored credential.
+    private readonly hooks: { onAuthFailed?: () => void } = {}
+  ) {
     this.serverPublicKey = publicKeyFromBase64(pairing.publicKeyB64)
     this.openConnection()
   }
@@ -645,6 +649,7 @@ export class WebRuntimeClient {
   }
 
   private setState(next: WebRuntimeConnectionState): void {
+    const previous = this.state
     this.state = next
     if (next === 'connected') {
       this.replayInterruptedSubscriptions()
@@ -654,6 +659,10 @@ export class WebRuntimeClient {
       }
     } else if (next === 'auth-failed') {
       this.rejectAllWaiters(new Error('Unauthorized. Pair this web client again.'))
+      // Why: fire only on the transition — the close path re-asserts auth-failed and must not retrigger recovery.
+      if (previous !== 'auth-failed') {
+        this.hooks.onAuthFailed?.()
+      }
     }
   }
 

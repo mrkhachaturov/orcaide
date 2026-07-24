@@ -106,7 +106,11 @@ import {
   updateStoredEnvironmentRuntimeId,
   type StoredWebRuntimeEnvironment
 } from './web-runtime-environment'
-import { parseWebPairingInput } from './web-pairing'
+import {
+  fetchTrustedSessionPairingInput,
+  parseWebPairingInput,
+  sameOriginWebSocketEndpoint
+} from './web-pairing'
 import { WebRuntimeClient } from './web-runtime-client'
 import { RuntimeRpcCallQueuePool } from '../../../shared/runtime-rpc-call-queue'
 import {
@@ -3272,10 +3276,46 @@ async function getRemoteRuntimeStatus(): Promise<RuntimeStatus> {
   return callRuntimeResult<RuntimeStatus>('status.get', undefined, 15_000)
 }
 
+// Why: trusted-proxy mode — a serve restart mints a fresh pairing offer, so the stored
+// environment's device token dies with the old process and every reconnect lands on
+// auth-failed. Re-probe /trusted-session: a NEW offer means the server re-keyed — adopt it
+// same-origin and reload; the SAME token means this credential was genuinely rejected —
+// fall through to stock behavior (manual re-pair). No-op when not behind a trusted proxy
+// (the probe 404s). The token comparison is also the reload-loop guard.
+let trustedSessionRecoveryInFlight = false
+async function attemptTrustedSessionRecovery(failedDeviceToken: string): Promise<void> {
+  if (trustedSessionRecoveryInFlight) {
+    return
+  }
+  trustedSessionRecoveryInFlight = true
+  try {
+    const input = await fetchTrustedSessionPairingInput()
+    const offer = input ? parseWebPairingInput(input) : null
+    if (!offer || offer.scope !== 'runtime' || offer.deviceToken === failedDeviceToken) {
+      return
+    }
+    saveStoredWebRuntimeEnvironment(
+      createStoredWebRuntimeEnvironment({
+        name: 'Orca Server',
+        offer: { ...offer, endpoint: sameOriginWebSocketEndpoint(window.location) },
+        previousEnvironment: readStoredWebRuntimeEnvironment()
+      })
+    )
+    window.location.reload()
+  } finally {
+    trustedSessionRecoveryInFlight = false
+  }
+}
+
 function getClientForEnvironment(environment: StoredWebRuntimeEnvironment): WebRuntimeClient {
   if (!activeClient || activeClientEnvironmentId !== environment.id) {
     activeClient?.close()
-    activeClient = new WebRuntimeClient(getPreferredWebPairingOffer(environment))
+    const offer = getPreferredWebPairingOffer(environment)
+    activeClient = new WebRuntimeClient(offer, {
+      onAuthFailed: () => {
+        void attemptTrustedSessionRecovery(offer.deviceToken)
+      }
+    })
     activeClientEnvironmentId = environment.id
   }
   return activeClient

@@ -919,9 +919,10 @@ export class OrcaRuntimeRpcServer {
         this.e2eeKeypair = pairingIdentity.e2eeKeypair
         this.pairingInitializationFailure = null
         try {
+          // Why: trusted-proxy mode binds loopback only, so the only way a packet reaches this port is through the front proxy (Coder), which already enforced auth.
+          const wsHost = this.trustedProxy ? '127.0.0.1' : '0.0.0.0'
           const wsTransport = new WebSocketTransport({
-            // Why: trusted-proxy mode binds loopback only, so the only way a packet reaches this port is through the front proxy (Coder), which already enforced auth.
-            host: this.trustedProxy ? '127.0.0.1' : '0.0.0.0',
+            host: wsHost,
             port: this.wsPort,
             staticRoot: this.webClientRoot,
             ...(this.trustedProxy && this.webClientRoot
@@ -989,7 +990,8 @@ export class OrcaRuntimeRpcServer {
           activeTransports.push(wsTransport)
           transportsMeta.push({
             kind: 'websocket',
-            endpoint: `ws://0.0.0.0:${wsTransport.resolvedPort}`
+            // Why: report the actual bind host — a trusted-proxy loopback bind advertised as 0.0.0.0 misleads operators reading orca_server_ready.
+            endpoint: `ws://${wsHost}:${wsTransport.resolvedPort}`
           })
         } catch (error) {
           // Why: WebSocket transport is supplementary; on failure (e.g. port in use) continue with Unix socket only.

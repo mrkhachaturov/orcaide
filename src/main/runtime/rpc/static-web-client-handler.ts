@@ -33,6 +33,7 @@ export function createStaticWebClientHandler(
 }
 
 // Why: mirrors code-server's `bind-addr: 127.0.0.1` + `--auth none` trust model — a loopback peer is proof the request arrived through the front proxy (Coder), which already enforced auth. The listener also binds loopback-only in trusted-proxy mode; this is defense in depth.
+// Threat model (accepted, by design): loopback gating means ANY local process on the host can read the offer and gain runtime access — identical to code-server's --auth none posture, where same-machine implies same-owner. --trusted-proxy is therefore only safe on single-owner hosts (e.g. a per-user Coder workspace), not on shared multi-user machines.
 function isLoopbackRemote(remoteAddress: string | undefined): boolean {
   return (
     remoteAddress === '127.0.0.1' ||

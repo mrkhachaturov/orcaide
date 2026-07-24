@@ -161,4 +161,26 @@ describe('mobile RPC allowlist', () => {
       )
     ).toEqual([])
   })
+
+  it('does not grant mobile credentials control over host CLI registration', () => {
+    // Why: cli.install/remove symlink `orca-ide` into ~/.local/bin on the
+    // workspace host — a host mutation. Only the full runtime-scope web client
+    // (agent-skill setup) may register the CLI; a paired phone must not. The
+    // status probe rides the same gate so the surface stays runtime-only.
+    const allowed = mobileRpcAllowlist()
+    expect(
+      ['cli.getInstallStatus', 'cli.install', 'cli.remove'].filter((method) => allowed.has(method))
+    ).toEqual([])
+  })
+
+  it('registers the runtime-only CLI registration methods', () => {
+    // Why: the web client routes agent-skill CLI setup through these; if one is
+    // dropped from ALL_RPC_METHODS the setup card silently reverts to "CLI
+    // registration is unavailable".
+    const registered = registeredRuntimeMethods()
+    const missing = ['cli.getInstallStatus', 'cli.install', 'cli.remove'].filter(
+      (method) => !registered.has(method)
+    )
+    expect(missing).toEqual([])
+  })
 })

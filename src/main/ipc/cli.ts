@@ -56,21 +56,31 @@ async function hydrateLocalShellPathForCli(force = false): Promise<void> {
   }
 }
 
+// Why: exported so the runtime RPC (`cli.*`) can reuse the exact IPC behavior —
+// the web client's terminals run on THIS server, so it must probe/register the
+// server's `orca-ide`, not anything in the browser. Same shell-path hydration
+// as the desktop handlers keeps `pathConfigured` matched to what a PTY sees.
+export async function getCliInstallStatusWithShellPathHydration(): Promise<CliInstallStatus> {
+  await hydrateLocalShellPathForCli()
+  return new CliInstaller().getStatus()
+}
+
+export async function installCliWithShellPathHydration(): Promise<CliInstallStatus> {
+  await hydrateLocalShellPathForCli(true)
+  return new CliInstaller().install()
+}
+
+export async function removeCliWithShellPathHydration(): Promise<CliInstallStatus> {
+  await hydrateLocalShellPathForCli()
+  return new CliInstaller().remove()
+}
+
 export function registerCliHandlers(): void {
-  ipcMain.handle('cli:getInstallStatus', async (): Promise<CliInstallStatus> => {
-    await hydrateLocalShellPathForCli()
-    return new CliInstaller().getStatus()
-  })
+  ipcMain.handle('cli:getInstallStatus', getCliInstallStatusWithShellPathHydration)
 
-  ipcMain.handle('cli:install', async (): Promise<CliInstallStatus> => {
-    await hydrateLocalShellPathForCli(true)
-    return new CliInstaller().install()
-  })
+  ipcMain.handle('cli:install', installCliWithShellPathHydration)
 
-  ipcMain.handle('cli:remove', async (): Promise<CliInstallStatus> => {
-    await hydrateLocalShellPathForCli()
-    return new CliInstaller().remove()
-  })
+  ipcMain.handle('cli:remove', removeCliWithShellPathHydration)
 
   ipcMain.handle(
     'cli:getWslInstallStatus',

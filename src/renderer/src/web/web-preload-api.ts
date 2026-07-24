@@ -37,6 +37,7 @@ import type {
   WorkspaceSessionPatch,
   WorkspaceSessionState
 } from '../../../shared/types'
+import type { CliInstallStatus } from '../../../shared/cli-install-types'
 import type { SkillDiscoveryResult } from '../../../shared/skills'
 import type { SkillFreshnessInventory } from '../../../shared/skill-freshness'
 import type { SshConnectionState, SshTarget } from '../../../shared/ssh-types'
@@ -2753,7 +2754,9 @@ function createPreflightApi(): NonNullable<Partial<PreloadApi>['preflight']> {
 }
 
 function createCliApi(): NonNullable<Partial<PreloadApi>['cli']> {
-  const status = {
+  // Why: with no server connected yet, the browser genuinely can't register a
+  // CLI — report unsupported honestly instead of pretending it can.
+  const disconnectedStatus: CliInstallStatus = {
     platform: getBrowserPlatform(),
     commandName: getBrowserPlatform() === 'linux' ? 'orca-ide' : 'orca',
     commandPath: null,
@@ -2765,15 +2768,40 @@ function createCliApi(): NonNullable<Partial<PreloadApi>['cli']> {
     state: 'unsupported',
     currentTarget: null,
     unsupportedReason: 'launch_mode_unavailable',
-    detail: 'CLI registration is managed on the Orca server, not in the web browser.'
-  } as const
+    detail: 'Connect to an Orca server before registering its CLI.'
+  }
+  // Why: WSL registration is a Windows-desktop affordance; a headless Linux
+  // serve has no WSL, so answer unsupported rather than route a method the
+  // server does not implement. (Linux status.platform hides WSL UI anyway.)
+  const wslUnsupportedStatus: CliInstallStatus = {
+    ...disconnectedStatus,
+    detail: 'WSL CLI registration is only available on the Windows desktop app.'
+  }
   return {
-    getInstallStatus: () => Promise.resolve(status),
-    install: () => Promise.resolve(status),
-    remove: () => Promise.resolve(status),
-    getWslInstallStatus: (_args?: { distro?: string | null }) => Promise.resolve(status),
-    installWsl: (_args?: { distro?: string | null }) => Promise.resolve(status),
-    removeWsl: (_args?: { distro?: string | null }) => Promise.resolve(status)
+    // Why: the CLI that matters is the connected SERVER's — its terminals resolve
+    // `orca-ide` from the workspace PATH, not from this browser. Route the real
+    // cli: surface (getInstallStatus/install/remove) through runtime RPC so
+    // agent-skill setup sees the same status the desktop app would. A read probe
+    // stays resilient (fall back on transient failure); install/remove surface
+    // real server errors so the prerequisite toast reports them, matching desktop.
+    getInstallStatus: () =>
+      requireActiveEnvironmentOrNull()
+        ? callRuntimeResult<CliInstallStatus>('cli.getInstallStatus').catch(
+            () => disconnectedStatus
+          )
+        : Promise.resolve(disconnectedStatus),
+    install: () =>
+      requireActiveEnvironmentOrNull()
+        ? callRuntimeResult<CliInstallStatus>('cli.install')
+        : Promise.resolve(disconnectedStatus),
+    remove: () =>
+      requireActiveEnvironmentOrNull()
+        ? callRuntimeResult<CliInstallStatus>('cli.remove')
+        : Promise.resolve(disconnectedStatus),
+    getWslInstallStatus: (_args?: { distro?: string | null }) =>
+      Promise.resolve(wslUnsupportedStatus),
+    installWsl: (_args?: { distro?: string | null }) => Promise.resolve(wslUnsupportedStatus),
+    removeWsl: (_args?: { distro?: string | null }) => Promise.resolve(wslUnsupportedStatus)
   } as NonNullable<Partial<PreloadApi>['cli']>
 }
 

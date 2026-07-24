@@ -591,7 +591,11 @@ export class OrcaRuntimeRpcServer {
   private buildTrustedSessionOffer(): string | null {
     const offer = this.createPairingOffer({
       address: this.trustedProxyAddress,
-      scope: 'runtime'
+      scope: 'runtime',
+      // Why: without a name these mint as the "CLI <date>" default, so browser
+      // sessions masquerade as command-line clients in the shared-access list.
+      // Named device classes are the upstream convention (Mobile/Runtime <date>).
+      name: `Web session ${new Date().toLocaleDateString()}`
     })
     return offer.available ? offer.pairingUrl : null
   }

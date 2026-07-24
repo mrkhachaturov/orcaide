@@ -777,7 +777,46 @@ export class OrcaRuntimeRpcServer {
             lastSeenAt: d.lastSeenAt
           }))
       }),
-      revokeDevice: async (deviceId) => ({ revoked: await this.revokeMobileDevice(deviceId) })
+      revokeDevice: async (deviceId) => ({ revoked: await this.revokeMobileDevice(deviceId) }),
+      // Why: the web tile's "Share this Orca server" surface — runtime-scope
+      // grants for full clients (desktop app, another browser). Minting runtime
+      // from runtime is not an escalation; the context gate still keeps phones
+      // out. Note the pending runtime device is shared with /trusted-session
+      // offers until first connect; the web client's stale-credential recovery
+      // covers the rotate-in-between case.
+      createRuntimeGrant: ({ rotate }) => {
+        const offer = this.createPairingOffer({
+          address: this.trustedProxyAddress,
+          rotate,
+          name: `Runtime ${new Date().toLocaleDateString()}`,
+          scope: 'runtime'
+        })
+        if (!offer.available) {
+          return { available: false, reason: offer.reason, guidance: offer.guidance }
+        }
+        return {
+          available: true,
+          pairingUrl: offer.pairingUrl,
+          webClientUrl: offer.webClientUrl,
+          endpoint: offer.endpoint,
+          deviceId: offer.deviceId
+        }
+      },
+      listRuntimeGrants: () => ({
+        // Why: mirror mobile:listRuntimeAccessGrants — pending runtime grants
+        // are bearer credentials even before first connect, so they must stay
+        // listed and revocable.
+        grants: (this.deviceRegistry?.listDevices() ?? [])
+          .filter((d) => d.scope === 'runtime')
+          .sort((a, b) => b.pairedAt - a.pairedAt)
+          .map((d) => ({
+            deviceId: d.deviceId,
+            name: d.name,
+            createdAt: d.pairedAt,
+            lastSeenAt: d.lastSeenAt > 0 ? d.lastSeenAt : null
+          }))
+      }),
+      revokeRuntimeGrant: (deviceId) => ({ revoked: this.revokeRuntimeAccess(deviceId) })
     }
   }
 

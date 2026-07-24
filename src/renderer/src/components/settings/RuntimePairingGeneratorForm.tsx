@@ -6,6 +6,7 @@ import { AddressPicker, type AddressOption } from '../network/AddressPicker'
 import { parseServerShareAddress } from '../../../../shared/network/server-share-address'
 import { GeneratedUrlRow, UnavailableUrlRow } from './RuntimePairingGeneratedUrlRows'
 import { translate } from '@/i18n/i18n'
+import { isWebClientLocation } from '@/lib/web-client-location'
 
 type RuntimePairingGeneratorFormProps = {
   loopbackAddress: string
@@ -50,10 +51,26 @@ export function RuntimePairingGeneratorForm({
     }))
   ]
 
+  // Why: in the web client the advertised address is server policy
+  // (serve --pairing-address, the workspace's public URL); there is no
+  // meaningful interface choice, so the address controls disappear and the
+  // form is just Generate + the resulting links.
+  const serverManagedAddress = isWebClientLocation()
+
   return (
     <>
       <div className="space-y-3">
-        <div className="space-y-1">
+        {serverManagedAddress ? (
+          <p className="text-xs text-muted-foreground">
+            {translate(
+              'auto.components.settings.RuntimePairingUrlGenerator.webAddressNotice',
+              'Access links connect through this server’s web address, so they work from any network. Each generated link is a fresh revocable credential.'
+            )}
+          </p>
+        ) : null}
+        {serverManagedAddress ? null : (
+          <>
+          <div className="space-y-1">
           <Label id="runtime-pairing-address-label" htmlFor="runtime-pairing-address">
             {translate(
               'auto.components.settings.RuntimePairingUrlGenerator.de77eb1b65',
@@ -153,6 +170,8 @@ export function RuntimePairingGeneratorForm({
             '127.0.0.1 only works on this computer. Use a LAN, Tailscale, or custom address for another device.'
           )}
         </p>
+          </>
+        )}
         <div className="flex justify-end">
           <Button
             type="button"

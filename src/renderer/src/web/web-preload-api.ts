@@ -865,15 +865,45 @@ function createWebPreloadApi(): Partial<PreloadApi> {
       getWindowsFirewallStatus: () => Promise.resolve({ supported: false }),
       repairWindowsFirewall: () => Promise.resolve({ ok: false, reason: 'unsupported' }),
       openWindowsNetworkSettings: () => Promise.resolve(false),
-      getRuntimePairingUrl: () => Promise.resolve({ available: false }),
+      // Why: "Share this Orca server" in the web tile mints RUNTIME grants for
+      // the connected server (the browser has no server of its own to
+      // advertise). Address is server policy and not forwarded — same contract
+      // as getPairingQR above.
+      getRuntimePairingUrl: async (args?: { address?: string; rotate?: boolean }) => {
+        const offer = await callRuntimeResult<
+          | { available: false; reason?: string; guidance?: string }
+          | {
+              available: true
+              pairingUrl: string
+              webClientUrl: string | null
+              endpoint: string
+              deviceId: string
+            }
+        >('mobile.getRuntimePairingUrl', args?.rotate ? { rotate: true } : {})
+        if (!offer.available) {
+          console.warn('[mobile] runtime grant unavailable:', offer.reason, offer.guidance)
+          return { available: false as const }
+        }
+        return {
+          available: true as const,
+          pairingUrl: offer.pairingUrl,
+          webClientUrl: offer.webClientUrl,
+          endpoint: offer.endpoint,
+          deviceId: offer.deviceId
+        }
+      },
       listDevices: () =>
         callRuntimeResult<{
           devices: { deviceId: string; name: string; pairedAt: number; lastSeenAt: number }[]
         }>('mobile.listDevices').catch(() => ({ devices: [] })),
       revokeDevice: (args: { deviceId: string }) =>
         callRuntimeResult<{ revoked: boolean }>('mobile.revokeDevice', args),
-      listRuntimeAccessGrants: () => Promise.resolve({ grants: [] }),
-      revokeRuntimeAccess: () => Promise.resolve({ revoked: false }),
+      listRuntimeAccessGrants: () =>
+        callRuntimeResult<{
+          grants: { deviceId: string; name: string; createdAt: number; lastSeenAt: number | null }[]
+        }>('mobile.listRuntimeAccessGrants').catch(() => ({ grants: [] })),
+      revokeRuntimeAccess: (args: { deviceId: string }) =>
+        callRuntimeResult<{ revoked: boolean }>('mobile.revokeRuntimeAccess', args),
       isWebSocketReady: () =>
         Promise.resolve({ ready: Boolean(activeEnvironment), endpoint: null }),
       getRelayStatus: () => Promise.resolve({ status: 'offline' as const }),

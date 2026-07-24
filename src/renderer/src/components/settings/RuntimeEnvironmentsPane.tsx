@@ -47,6 +47,7 @@ import {
   DialogTitle
 } from '../ui/dialog'
 import { RuntimePairingUrlGenerator } from './RuntimePairingUrlGenerator'
+import { isWebClientLocation } from '@/lib/web-client-location'
 import { EphemeralVmRuntimesSection } from './EphemeralVmRuntimesSection'
 import {
   getRuntimeEnvironmentsSearchEntry,
@@ -1238,16 +1239,26 @@ export function RuntimeEnvironmentsPane({
         <div className="space-y-3 pt-2">
           <div className="space-y-0.5">
             <div className="text-sm font-medium">
-              {translate(
-                'auto.components.settings.RuntimeEnvironmentsPane.advertiseThisApp',
-                'Advertise this app as a server'
-              )}
+              {isWebClientLocation()
+                ? translate(
+                    'auto.components.settings.RuntimeEnvironmentsPane.advertiseConnectedServer',
+                    'Share the connected server'
+                  )
+                : translate(
+                    'auto.components.settings.RuntimeEnvironmentsPane.advertiseThisApp',
+                    'Advertise this app as a server'
+                  )}
             </div>
             <p className="text-xs text-muted-foreground">
-              {translate(
-                'auto.components.settings.RuntimeEnvironmentsPane.advertiseThisAppHelp',
-                'Create access links for browsers, mobile clients, or another Orca client to connect back to this running app.'
-              )}
+              {isWebClientLocation()
+                ? translate(
+                    'auto.components.settings.RuntimeEnvironmentsPane.advertiseConnectedServerHelp',
+                    'Create access links so your desktop app, another browser, or another Orca client can connect to this server through its web address.'
+                  )
+                : translate(
+                    'auto.components.settings.RuntimeEnvironmentsPane.advertiseThisAppHelp',
+                    'Create access links for browsers, mobile clients, or another Orca client to connect back to this running app.'
+                  )}
             </p>
           </div>
           <div className="overflow-hidden rounded-lg border border-border/50 bg-card/30">

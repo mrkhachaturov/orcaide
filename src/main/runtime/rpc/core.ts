@@ -24,15 +24,31 @@ export type TrustedMobilePairingOfferResult =
       connectionMode: 'automatic' | 'local-only'
     }
 
+export type TrustedRuntimeGrantResult =
+  | { available: false; reason: string; guidance: string }
+  | {
+      available: true
+      pairingUrl: string
+      webClientUrl: string | null
+      endpoint: string
+      deviceId: string
+    }
+
 // Why: mirrors the mobile: IPC handlers for web clients that have no Electron
 // IPC. The transport injects this only for runtime-scope connections, so a
-// paired phone (mobile scope) can never mint or revoke device credentials.
+// paired phone (mobile scope) can never mint or revoke device credentials —
+// neither mobile ones (createOffer) nor full runtime grants (createRuntimeGrant).
 export type TrustedMobilePairingRpcContext = {
   createOffer(params: { rotate?: boolean }): Promise<TrustedMobilePairingOfferResult>
   listDevices(): {
     devices: { deviceId: string; name: string; pairedAt: number; lastSeenAt: number }[]
   }
   revokeDevice(deviceId: string): Promise<{ revoked: boolean }>
+  createRuntimeGrant(params: { rotate?: boolean }): TrustedRuntimeGrantResult
+  listRuntimeGrants(): {
+    grants: { deviceId: string; name: string; createdAt: number; lastSeenAt: number | null }[]
+  }
+  revokeRuntimeGrant(deviceId: string): { revoked: boolean }
 }
 
 export type RpcEnvelopeMeta = {

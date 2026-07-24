@@ -1615,7 +1615,10 @@ function Settings(): React.JSX.Element {
                     <RuntimeEnvironmentsPane
                       settings={settings}
                       setActiveRuntimeEnvironmentPreference={setActiveRuntimeEnvironmentPreference}
-                      canGeneratePairingUrl={!isWebClient}
+                      // Why: in web the section shares the CONNECTED workspace
+                      // server (runtime-RPC mint, patch 0003) — the browser
+                      // itself still has no server to advertise.
+                      canGeneratePairingUrl
                       allowLocalRuntime={!isWebClient}
                       addServerIntentSignal={remoteServerAddIntentSignal}
                     />

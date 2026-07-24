@@ -41,5 +41,40 @@ export const MOBILE_PAIRING_METHODS: readonly RpcAnyMethod[] = [
       }
       return await ctx.trustedMobilePairing.revokeDevice(params.deviceId)
     }
+  }),
+  // Why: the "Share this Orca server" surface for web clients — full runtime
+  // grants for desktop/browser clients. Same authorization story as above:
+  // context injected only for runtime-scope connections; runtime→runtime is
+  // not an escalation, but a phone minting a runtime grant would be.
+  defineMethod({
+    name: 'mobile.getRuntimePairingUrl',
+    // Why: strict — the advertised address is server policy (--pairing-address).
+    params: z.object({ rotate: z.boolean().optional() }).strict(),
+    handler: (params, ctx) => {
+      if (!ctx.trustedMobilePairing) {
+        throw new Error('trusted_mobile_pairing_unavailable')
+      }
+      return ctx.trustedMobilePairing.createRuntimeGrant({ rotate: params.rotate })
+    }
+  }),
+  defineMethod({
+    name: 'mobile.listRuntimeAccessGrants',
+    params: null,
+    handler: (_params, ctx) => {
+      if (!ctx.trustedMobilePairing) {
+        throw new Error('trusted_mobile_pairing_unavailable')
+      }
+      return ctx.trustedMobilePairing.listRuntimeGrants()
+    }
+  }),
+  defineMethod({
+    name: 'mobile.revokeRuntimeAccess',
+    params: z.object({ deviceId: z.string().min(1) }).strict(),
+    handler: (params, ctx) => {
+      if (!ctx.trustedMobilePairing) {
+        throw new Error('trusted_mobile_pairing_unavailable')
+      }
+      return ctx.trustedMobilePairing.revokeRuntimeGrant(params.deviceId)
+    }
   })
 ]

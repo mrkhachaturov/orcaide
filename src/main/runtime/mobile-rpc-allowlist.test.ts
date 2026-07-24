@@ -140,9 +140,16 @@ describe('mobile RPC allowlist', () => {
     // allowlist is the first line and must never regress.
     const allowed = mobileRpcAllowlist()
     expect(
-      ['mobile.createPairingOffer', 'mobile.listDevices', 'mobile.revokeDevice'].filter((method) =>
-        allowed.has(method)
-      )
+      [
+        'mobile.createPairingOffer',
+        'mobile.listDevices',
+        'mobile.revokeDevice',
+        // Why: runtime grants are FULL-access credentials — a phone minting one
+        // would escalate straight past its allowlist.
+        'mobile.getRuntimePairingUrl',
+        'mobile.listRuntimeAccessGrants',
+        'mobile.revokeRuntimeAccess'
+      ].filter((method) => allowed.has(method))
     ).toEqual([])
   })
 

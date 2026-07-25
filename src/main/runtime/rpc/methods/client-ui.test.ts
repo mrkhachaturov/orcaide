@@ -57,6 +57,47 @@ describe('client UI RPC methods', () => {
     expect(response).toMatchObject({ ok: true, result: { settings } })
   })
 
+  // Why: settings.get is on the mobile allowlist, and 0008 widened what it returns to include the
+  // runtime-seeded rows. Those carry this deployment's editor hostnames and a phone has no "Open
+  // in" menu to use them — so they stay off the mobile payload, like terminalQuickCommands.
+  it('withholds seeded Open In entries from mobile-scope clients', async () => {
+    const settings = {
+      defaultTuiAgent: 'codex',
+      agentCmdOverrides: {},
+      theme: 'dark',
+      openInApplications: [
+        { id: 'code-server', label: 'code-server', command: '', url: 'https://cs.example.com/' }
+      ]
+    }
+    const runtime = {
+      getRuntimeId: () => 'test-runtime',
+      getClientSettings: vi.fn(() => settings)
+    } as unknown as OrcaRuntimeService
+    const dispatcher = new RpcDispatcher({ runtime, methods: CLIENT_UI_METHODS })
+
+    const replies: string[] = []
+    await dispatcher.dispatchStreaming(
+      makeRequest('settings.get'),
+      (response) => replies.push(response),
+      { clientKind: 'mobile' }
+    )
+    const mobile = JSON.parse(replies[0]!) as { result: { settings: Record<string, unknown> } }
+
+    expect(mobile.result.settings).not.toHaveProperty('openInApplications')
+    // Why assert this too: the diet must cost the phone nothing else it already relied on.
+    expect(mobile.result.settings).toMatchObject({ defaultTuiAgent: 'codex', theme: 'dark' })
+
+    replies.length = 0
+    await dispatcher.dispatchStreaming(
+      makeRequest('settings.get'),
+      (response) => replies.push(response),
+      { clientKind: 'runtime' }
+    )
+    const full = JSON.parse(replies[0]!) as { result: { settings: Record<string, unknown> } }
+
+    expect(full.result.settings).toEqual(settings)
+  })
+
   it('persists the runtime host task source settings for mobile Tasks', async () => {
     const settings = {
       defaultTuiAgent: null,

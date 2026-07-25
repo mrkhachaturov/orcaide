@@ -1,8 +1,12 @@
 import type React from 'react'
 import { useState } from 'react'
-import { Check, ChevronDown, Pencil, Trash2 } from 'lucide-react'
+import { Check, ChevronDown } from 'lucide-react'
 import type { GlobalSettings, OpenInApplication } from '../../../../shared/types'
-import { OPEN_IN_APPLICATIONS_MAX } from '../../../../shared/open-in-applications'
+import {
+  createOpenInApplicationId,
+  isOpenInApplicationIncomplete,
+  OPEN_IN_APPLICATIONS_MAX
+} from '../../../../shared/open-in-applications'
 import { Button } from '../ui/button'
 import {
   DropdownMenu,
@@ -11,16 +15,14 @@ import {
   DropdownMenuShortcut,
   DropdownMenuTrigger
 } from '../ui/dropdown-menu'
-import { Input } from '../ui/input'
 import { Label } from '../ui/label'
-import { cn } from '@/lib/utils'
 import {
-  getOpenInAppPreset,
   isOpenInAppPresetAdded,
   OpenInApplicationIcon,
   getOpenInAppPresets,
   type OpenInAppPreset
 } from '@/lib/open-in-app-catalog'
+import { OpenInMenuRow } from './OpenInMenuRow'
 import { translate } from '@/i18n/i18n'
 
 type OpenInMenuSettingProps = {
@@ -35,17 +37,22 @@ type OpenInApplicationsDraftState = {
 
 function createOpenInApplication(): OpenInApplication {
   return {
-    id:
-      globalThis.crypto?.randomUUID?.() ??
-      `open-in-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
+    id: createOpenInApplicationId(),
     label: '',
     command: ''
   }
 }
 
-export function createPresetOpenInApplication(preset: OpenInAppPreset): OpenInApplication {
+export function createPresetOpenInApplication(
+  preset: OpenInAppPreset,
+  takenIds: ReadonlySet<string> = new Set()
+): OpenInApplication {
   return {
-    id: preset.id,
+    // Why the preset's id is not unconditional: a seeded browser-editor row may already own
+    // `vscode` or `cursor` (its favicon is keyed on that id), and normalizeOpenInApplications
+    // dedupes by id keeping the FIRST row. Reusing a taken id would make "Add app → VS Code"
+    // look like it did nothing at all.
+    id: takenIds.has(preset.id) ? createOpenInApplicationId() : preset.id,
     label: preset.label,
     command: preset.command
   }
@@ -70,167 +77,17 @@ function resolveOpenInApplicationsDraftState(
 }
 
 export function shouldCommitOpenInApplicationsDraft(applications: OpenInApplication[]): boolean {
-  return applications.every((application) => {
-    return application.label.trim() !== '' && application.command.trim() !== ''
-  })
-}
-
-function OpenInMenuRow({
-  application,
-  editing,
-  onEditToggle,
-  onRemove,
-  onChange,
-  onCommit
-}: {
-  application: OpenInApplication
-  editing: boolean
-  onEditToggle: () => void
-  onRemove: () => void
-  onChange: (updates: Pick<OpenInApplication, 'label' | 'command'>) => void
-  onCommit: () => void
-}): React.JSX.Element {
-  const preset = getOpenInAppPreset(application)
-  const isPreset =
-    preset !== null &&
-    (application.id === preset.id ||
-      application.label.trim().toLowerCase() === preset.label.toLowerCase())
-
-  return (
-    <div className="py-3">
-      <div className="flex flex-wrap items-start gap-3">
-        <div className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border/50 bg-background/50">
-          <OpenInApplicationIcon application={application} size={16} />
-        </div>
-
-        <div className="min-w-0 flex-1 sm:min-w-[12rem]">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium leading-none">
-              {application.label.trim() ||
-                translate('auto.components.settings.OpenInMenuSetting.f79084947b', 'New app')}
-            </span>
-          </div>
-          <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
-            {application.command.trim() ||
-              translate('auto.components.settings.OpenInMenuSetting.3743ed080c', 'Set command')}
-          </div>
-        </div>
-
-        <div className="ml-auto flex shrink-0 items-center gap-1">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            onClick={onEditToggle}
-            title={
-              editing
-                ? translate(
-                    'auto.components.settings.OpenInMenuSetting.494ed535cd',
-                    'Collapse app details'
-                  )
-                : translate('auto.components.settings.OpenInMenuSetting.af7d1c3656', 'Edit app')
-            }
-            aria-label={
-              editing
-                ? translate(
-                    'auto.components.settings.OpenInMenuSetting.494ed535cd',
-                    'Collapse app details'
-                  )
-                : translate('auto.components.settings.OpenInMenuSetting.af7d1c3656', 'Edit app')
-            }
-            aria-expanded={editing}
-            className={cn(
-              'size-7 text-muted-foreground hover:text-foreground',
-              editing && 'text-foreground'
-            )}
-          >
-            <Pencil className="size-3.5" />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            onClick={onRemove}
-            title={translate('auto.components.settings.OpenInMenuSetting.a261931d29', 'Remove app')}
-            aria-label={translate(
-              'auto.components.settings.OpenInMenuSetting.a261931d29',
-              'Remove app'
-            )}
-            className="size-7 text-muted-foreground hover:text-destructive"
-          >
-            <Trash2 className="size-3.5" />
-          </Button>
-        </div>
-      </div>
-
-      {editing && (
-        <div
-          className={cn(
-            'mt-3 grid grid-cols-1 gap-2 pl-10',
-            !isPreset && 'sm:grid-cols-[minmax(12rem,1fr)_minmax(12rem,1fr)]'
-          )}
-        >
-          {!isPreset && (
-            <div className="space-y-1">
-              <Label className="text-[11px] text-muted-foreground">
-                {translate('auto.components.settings.OpenInMenuSetting.e1fc0085c6', 'Menu label')}
-              </Label>
-              <Input
-                value={application.label}
-                placeholder={translate(
-                  'auto.components.settings.OpenInMenuSetting.3ebe650f74',
-                  'App name'
-                )}
-                onChange={(event) =>
-                  onChange({ label: event.target.value, command: application.command })
-                }
-                onBlur={onCommit}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    onCommit()
-                    event.currentTarget.blur()
-                  }
-                }}
-              />
-            </div>
-          )}
-          <div className="space-y-1">
-            <Label className="text-[11px] text-muted-foreground">
-              {translate(
-                'auto.components.settings.OpenInMenuSetting.ba1422ee07',
-                'Terminal command'
-              )}
-            </Label>
-            <Input
-              value={application.command}
-              placeholder={translate(
-                'auto.components.settings.OpenInMenuSetting.810ef39b56',
-                'cursor'
-              )}
-              spellCheck={false}
-              className="font-mono text-xs"
-              onChange={(event) =>
-                onChange({ label: application.label, command: event.target.value })
-              }
-              onBlur={onCommit}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  onCommit()
-                  event.currentTarget.blur()
-                }
-              }}
-            />
-            <p className="text-[11px] text-muted-foreground">
-              {translate(
-                'auto.components.settings.OpenInMenuSetting.eb55b87570',
-                'The command you would type in Terminal to open this app.'
-              )}
-            </p>
-          </div>
-        </div>
-      )}
-    </div>
-  )
+  // Why this defers to the normalizer's own rule rather than restating one: whatever this pane
+  // commits goes straight through `normalizeOpenInApplications`, so a second definition of
+  // "finished" here would mean persisting rows the normalizer then silently drops. It had
+  // required a `command`, which a browser-editor row by construction has none of — so one seeded
+  // row made every write from this pane a no-op for as long as it existed.
+  //
+  // Why URL *validity* is deliberately not part of it: an unusable template is exactly what a
+  // hand-edited store or a bad seed produces, and refusing to commit on it would re-create that
+  // inert-pane bug. A bad URL is surfaced where it matters — inline in the editor, and as a
+  // disabled "Invalid URL" item in the Open in menu.
+  return applications.every((application) => !isOpenInApplicationIncomplete(application))
 }
 
 export function OpenInMenuSetting({
@@ -274,7 +131,10 @@ export function OpenInMenuSetting({
     if (isAtLimit || isOpenInAppPresetAdded(draft, preset)) {
       return
     }
-    applyDraft([...draft, createPresetOpenInApplication(preset)])
+    applyDraft([
+      ...draft,
+      createPresetOpenInApplication(preset, new Set(draft.map((entry) => entry.id)))
+    ])
   }
 
   const addCustomApp = (): void => {
@@ -349,9 +209,7 @@ export function OpenInMenuSetting({
         <div className="divide-y divide-border/40">
           {draft.map((application, index) => {
             const editing =
-              editingIds.has(application.id) ||
-              application.label.trim() === '' ||
-              application.command.trim() === ''
+              editingIds.has(application.id) || isOpenInApplicationIncomplete(application)
             return (
               <OpenInMenuRow
                 key={application.id}

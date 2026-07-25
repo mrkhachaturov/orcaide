@@ -6,6 +6,7 @@ import {
   getOpenInEntryAvailability,
   getLocalFileManagerLabel,
   openOpenInAppsSettings,
+  openWorktreeOpenInEntry,
   openWorktreePath,
   WorktreeOpenInSubMenu
 } from './WorktreeOpenInMenu'
@@ -19,6 +20,7 @@ const {
   mockState,
   openInExternalEditorMock,
   openInFileManagerMock,
+  openUrlMock,
   openSettingsPageMock,
   openSettingsTargetMock,
   toastErrorMock
@@ -26,11 +28,12 @@ const {
   mockState: {
     settings: {
       activeRuntimeEnvironmentId: null as string | null,
-      openInApplications: [] as { id: string; label: string; command: string }[]
+      openInApplications: [] as { id: string; label: string; command: string; url?: string }[]
     }
   },
   openInExternalEditorMock: vi.fn(),
   openInFileManagerMock: vi.fn(),
+  openUrlMock: vi.fn(),
   openSettingsPageMock: vi.fn(),
   openSettingsTargetMock: vi.fn(),
   toastErrorMock: vi.fn()
@@ -91,17 +94,20 @@ describe('WorktreeOpenInMenu', () => {
     toastErrorMock.mockReset()
     openInFileManagerMock.mockReset()
     openInExternalEditorMock.mockReset()
+    openUrlMock.mockReset()
     openSettingsPageMock.mockReset()
     openSettingsTargetMock.mockReset()
     openInFileManagerMock.mockResolvedValue({ ok: true })
     openInExternalEditorMock.mockResolvedValue({ ok: true })
+    openUrlMock.mockResolvedValue(undefined)
     Object.defineProperty(globalThis, 'window', {
       configurable: true,
       value: {
         api: {
           shell: {
             openInFileManager: openInFileManagerMock,
-            openInExternalEditor: openInExternalEditorMock
+            openInExternalEditor: openInExternalEditorMock,
+            openUrl: openUrlMock
           }
         }
       }
@@ -306,5 +312,93 @@ describe('WorktreeOpenInMenu', () => {
           'Add a Host alias for builder.example.com:2222 to your local SSH config, reconnect the workspace, then try again.'
       }
     )
+  })
+})
+
+// Why a whole block: the browser tile IS the remote-runtime case, so a URL entry is the only
+// "Open in" target it can ever offer. Every assertion here is something the tile depends on.
+describe('WorktreeOpenInMenu URL entries', () => {
+  const CODE_SERVER = {
+    id: 'code-server',
+    label: 'code-server',
+    command: '',
+    url: 'https://cs.example.com/?folder={path}'
+  }
+
+  beforeEach(() => {
+    mockState.settings = {
+      activeRuntimeEnvironmentId: 'web-runtime-1',
+      openInApplications: [CODE_SERVER]
+    }
+    toastErrorMock.mockReset()
+    openInExternalEditorMock.mockReset()
+    openInExternalEditorMock.mockResolvedValue({ ok: true })
+    openUrlMock.mockReset()
+    openUrlMock.mockResolvedValue(undefined)
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        api: {
+          shell: {
+            openInFileManager: openInFileManagerMock,
+            openInExternalEditor: openInExternalEditorMock,
+            openUrl: openUrlMock
+          }
+        }
+      }
+    })
+  })
+
+  it('carries the url onto the menu entry', () => {
+    const [entry] = getWorktreeOpenInEntries([CODE_SERVER], 'File Manager')
+
+    expect(entry).toMatchObject({ id: 'code-server', url: CODE_SERVER.url })
+  })
+
+  it('enables a URL entry even though the runtime is remote', () => {
+    const [entry] = getWorktreeOpenInEntries([CODE_SERVER], 'File Manager')
+
+    expect(getOpenInEntryAvailability(entry, mockState.settings, null)).toEqual({ disabled: false })
+  })
+
+  // Why: the availability check and the click used to disagree — the item read as enabled and the
+  // click then re-derived capability WITHOUT the url and refused. This is that regression.
+  it('opens the resolved URL instead of reaching for a local editor', async () => {
+    const [entry] = getWorktreeOpenInEntries([CODE_SERVER], 'File Manager')
+
+    await openWorktreeOpenInEntry(entry, { worktreePath: '/home/coder/proj', connectionId: null })
+
+    expect(openUrlMock).toHaveBeenCalledWith('https://cs.example.com/?folder=%2Fhome%2Fcoder%2Fproj')
+    expect(openInExternalEditorMock).not.toHaveBeenCalled()
+    expect(toastErrorMock).not.toHaveBeenCalled()
+  })
+
+  it('still routes a command entry to the local editor through the same helper', async () => {
+    mockState.settings = { activeRuntimeEnvironmentId: null, openInApplications: [] }
+    const [entry] = getWorktreeOpenInEntries(
+      [{ id: 'cursor', label: 'Cursor', command: 'cursor' }],
+      'File Manager'
+    )
+
+    await openWorktreeOpenInEntry(entry, { worktreePath: '/tmp/proj', connectionId: null })
+
+    expect(openInExternalEditorMock).toHaveBeenCalledWith({
+      path: '/tmp/proj',
+      command: 'cursor',
+      connectionId: null
+    })
+    expect(openUrlMock).not.toHaveBeenCalled()
+  })
+
+  it('disables an entry whose URL could never navigate, and says why', () => {
+    const [entry] = getWorktreeOpenInEntries(
+      [{ ...CODE_SERVER, url: 'javascript:alert(1)' }],
+      'File Manager'
+    )
+
+    expect(getOpenInEntryAvailability(entry, mockState.settings, null)).toEqual({
+      disabled: true,
+      metadata: 'Invalid URL'
+    })
   })
 })

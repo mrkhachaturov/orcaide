@@ -12,7 +12,19 @@ export const CLIENT_UI_METHODS: RpcMethod[] = [
   defineMethod({
     name: 'settings.get',
     params: null,
-    handler: (_params, { runtime }) => ({ settings: runtime.getClientSettings() })
+    // Why phones do not get openInApplications: the seeded rows carry this deployment's editor
+    // hostnames, and a phone has no "Open in" menu to spend them on. Same payload-diet rule as
+    // terminalQuickCommands below — a mobile-scope credential is handed the smallest useful
+    // settings object, not everything a full client reads.
+    handler: (_params, { runtime, clientKind }) => {
+      const settings = runtime.getClientSettings()
+      if (clientKind !== 'mobile') {
+        return { settings }
+      }
+      const { openInApplications: _withheldFromMobile, ...mobileSettings } = settings
+      void _withheldFromMobile
+      return { settings: mobileSettings }
+    }
   }),
   defineMethod({
     name: 'settings.update',

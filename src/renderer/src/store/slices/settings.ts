@@ -12,7 +12,10 @@ import type { RuntimeStatus } from '../../../../shared/runtime-types'
 import { normalizeTerminalQuickCommands } from '../../../../shared/terminal-quick-commands'
 import { normalizeTerminalCustomThemes } from '../../../../shared/terminal-custom-themes'
 import { normalizeTaskProviderSettings } from '../../../../shared/task-providers'
-import { normalizeOpenInApplications } from '../../../../shared/open-in-applications'
+import {
+  createOpenInApplicationId,
+  normalizeOpenInApplications
+} from '../../../../shared/open-in-applications'
 import { createSettingsSearchState, type SettingsSearchState } from './settings-search-state'
 import { normalizeDisabledTuiAgents } from '../../../../shared/tui-agent-selection'
 import {
@@ -38,13 +41,6 @@ type LegacyTerminalScrollbackSettingsUpdate = Partial<GlobalSettings> & {
 function normalizeRuntimeEnvironmentId(value: string | null | undefined): string | null {
   const trimmed = value?.trim()
   return trimmed ? trimmed : null
-}
-
-function createOpenInApplicationId(): string {
-  return (
-    globalThis.crypto?.randomUUID?.() ??
-    `open-in-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-  )
 }
 
 async function verifyRuntimeEnvironmentReachable(environmentId: string | null): Promise<void> {

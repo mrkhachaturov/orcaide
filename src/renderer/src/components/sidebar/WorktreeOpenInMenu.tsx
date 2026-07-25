@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react'
-import { ExternalLink, FolderOpen } from 'lucide-react'
+import { FolderOpen } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   DropdownMenuItem,
@@ -11,73 +11,30 @@ import {
 import { useAppStore } from '@/store'
 import { isLocalPathOpenBlocked, showLocalPathOpenBlockedToast } from '@/lib/local-path-open-guard'
 import { getLocalFileManagerLabel } from '@/lib/local-file-manager-label'
-import { OpenInApplicationIcon } from '@/lib/open-in-app-catalog'
 import { getExternalEditorOpenCapability } from '@/lib/external-editor-open-capability'
+import {
+  getOpenInEntryAvailability,
+  getWorktreeOpenInEntries,
+  OpenInMenuEntryIcon,
+  type OpenInMenuEntry
+} from '@/lib/open-in-menu-entries'
+import { resolveOpenInUrl } from '../../../../shared/open-in-url-template'
 import type { ShellOpenExternalEditorResult } from '../../../../shared/shell-open-types'
-import type { GlobalSettings, OpenInApplication } from '../../../../shared/types'
 import { translate } from '@/i18n/i18n'
 
 export { getLocalFileManagerLabel } from '@/lib/local-file-manager-label'
+export {
+  getOpenInEntryAvailability,
+  getWorktreeOpenInEntries,
+  OpenInMenuEntryIcon,
+  type OpenInMenuEntry
+} from '@/lib/open-in-menu-entries'
 
 type WorktreeOpenInMenuItemsProps = {
   worktreePath: string
   connectionId?: string | null
   disabled?: boolean
   labelPrefix?: string
-}
-
-export type OpenInMenuEntry = {
-  id: string
-  label: string
-  target: 'external-editor' | 'file-manager'
-  command?: string
-}
-
-export function getWorktreeOpenInEntries(
-  openInApplications: OpenInApplication[],
-  fileManagerLabel: string
-): OpenInMenuEntry[] {
-  return [
-    ...openInApplications.map((application) => ({
-      id: application.id,
-      label: application.label,
-      target: 'external-editor' as const,
-      command: application.command
-    })),
-    { id: 'file-manager', label: fileManagerLabel, target: 'file-manager' }
-  ]
-}
-
-export function getOpenInEntryAvailability(
-  entry: OpenInMenuEntry,
-  settings: Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> | null | undefined,
-  connectionId?: string | null
-): { disabled: boolean; metadata?: string } {
-  if (entry.target === 'file-manager') {
-    const disabled = isLocalPathOpenBlocked(settings, { connectionId })
-    return disabled
-      ? {
-          disabled: true,
-          metadata: translate('auto.components.sidebar.WorktreeOpenInMenu.localOnly', 'Local only')
-        }
-      : { disabled: false }
-  }
-  const capability = getExternalEditorOpenCapability(settings, {
-    connectionId,
-    command: entry.command
-  })
-  if (!capability.allowed) {
-    return {
-      disabled: true,
-      metadata: translate('auto.components.sidebar.WorktreeOpenInMenu.localOnly', 'Local only')
-    }
-  }
-  return capability.remote
-    ? {
-        disabled: false,
-        metadata: translate('auto.components.sidebar.WorktreeOpenInMenu.remoteSsh', 'Remote SSH')
-      }
-    : { disabled: false }
 }
 
 function showOpenFailureToast(
@@ -245,8 +202,26 @@ export async function openWorktreePath(args: {
   worktreePath: string
   connectionId?: string | null
   command?: string
+  url?: string
 }): Promise<void> {
   const settings = useAppStore.getState().settings
+  // Why this runs before every guard below: a URL entry never touches the local OS. The path is
+  // handed to whoever serves that URL — typically the same host the worktree lives on — so the
+  // local/remote reasoning the guards encode simply does not apply.
+  if (args.target === 'external-editor' && args.url?.trim()) {
+    const resolved = resolveOpenInUrl(args.url, args.worktreePath)
+    if (!resolved) {
+      toast.error(
+        translate(
+          'auto.components.sidebar.WorktreeOpenInMenu.openInUrlInvalid',
+          'That app has an invalid URL.'
+        )
+      )
+      return
+    }
+    await window.api.shell.openUrl(resolved)
+    return
+  }
   if (args.target === 'file-manager') {
     if (isLocalPathOpenBlocked(settings, { connectionId: args.connectionId ?? null })) {
       showLocalPathOpenBlockedToast()
@@ -255,7 +230,8 @@ export async function openWorktreePath(args: {
   } else {
     const capability = getExternalEditorOpenCapability(settings, {
       connectionId: args.connectionId,
-      command: args.command
+      command: args.command,
+      url: args.url
     })
     if (!capability.allowed) {
       if (capability.reason === 'remote-runtime') {
@@ -280,16 +256,35 @@ export async function openWorktreePath(args: {
   }
 }
 
+/**
+ * Open a menu entry — the only way any "Open in" menu should invoke `openWorktreePath`.
+ *
+ * Why it takes the whole entry: there are two of these menus (the worktree card's, and Source
+ * Control's file context menu), and they used to each destructure the fields they knew about.
+ * Adding `url` to the entry therefore left the second menu passing an entry that was *enabled*
+ * because it had a URL, to a call that had dropped it — an item that could only ever fail. The
+ * entry travels intact so a new field cannot be silently lost at one call site.
+ */
+export async function openWorktreeOpenInEntry(
+  entry: OpenInMenuEntry,
+  args: { worktreePath: string; connectionId?: string | null }
+): Promise<void> {
+  await openWorktreePath({
+    target: entry.target,
+    worktreePath: args.worktreePath,
+    connectionId: args.connectionId,
+    command: entry.command,
+    url: entry.url
+  })
+}
+
 function useOpenInWorktreePath({
   worktreePath,
   connectionId
-}: WorktreeOpenInMenuItemsProps): (
-  target: 'file-manager' | 'external-editor',
-  command?: string
-) => Promise<void> {
+}: WorktreeOpenInMenuItemsProps): (entry: OpenInMenuEntry) => Promise<void> {
   return useCallback(
-    async (target, command) => {
-      await openWorktreePath({ target, worktreePath, connectionId, command })
+    async (entry) => {
+      await openWorktreeOpenInEntry(entry, { worktreePath, connectionId })
     },
     [connectionId, worktreePath]
   )
@@ -316,17 +311,11 @@ export function WorktreeOpenInMenuItems({
             key={entry.id}
             onClick={stopMenuPropagation}
             onSelect={() => {
-              void openInWorktreePath(entry.target, entry.command)
+              void openInWorktreePath(entry)
             }}
             disabled={disabled || availability.disabled}
           >
-            {entry.target === 'file-manager' ? (
-              <FolderOpen className="size-3.5" />
-            ) : entry.command ? (
-              <OpenInApplicationIcon application={{ command: entry.command }} size={14} />
-            ) : (
-              <ExternalLink className="size-3.5" />
-            )}
+            <OpenInMenuEntryIcon entry={entry} />
             <span className="min-w-0 truncate">
               {labelPrefix}
               {entry.label}

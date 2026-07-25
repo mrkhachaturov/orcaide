@@ -2573,6 +2573,11 @@ export type OpenInApplication = {
   id: string
   label: string
   command: string
+  /** When set, the entry opens this URL instead of spawning `command`. `{path}` is replaced with
+   *  the worktree's absolute path, URL-encoded. Lets a remote runtime offer a browser-based
+   *  editor (code-server, vscode-web, …) that `command` entries cannot reach — see
+   *  `shared/open-in-url-template.ts`. */
+  url?: string
 }
 
 export type SourceControlViewMode = 'list' | 'tree'

@@ -5,8 +5,20 @@ import {
   normalizeLeftSidebarTintColor,
   normalizeLeftSidebarTintOpacity
 } from './left-sidebar-appearance'
+import { normalizeOpenInApplications } from './open-in-applications'
 import { normalizeUiLanguage } from './ui-language'
-import type { GlobalSettings } from './types'
+import type { GlobalSettings, OpenInApplication } from './types'
+
+/**
+ * True when a normalized row is safe to hand a client: it opens a URL and runs nothing.
+ *
+ * This is the ONLY rule seeding adds on top of the store's own. `command` is a shell command a
+ * DESKTOP client executes, and seeding travels runtime → client, so honouring one would let
+ * whoever writes the runtime's store hand a client something to run.
+ */
+function isSeedableOpenInApplication(entry: OpenInApplication): boolean {
+  return entry.command === '' && Boolean(entry.url)
+}
 
 /**
  * Settings a runtime hands a web client as its STARTING values — defaults, not policy.
@@ -60,7 +72,34 @@ export const RUNTIME_SEEDED_SETTING_SCHEMA = {
   experimentalPet: z.boolean(),
   experimentalTerminalAttention: z.boolean(),
   experimentalMobile: z.boolean(),
-  mobileEmulatorEnabled: z.boolean()
+  mobileEmulatorEnabled: z.boolean(),
+
+  // ── Open In entries — URL templates only, never commands ──────────────────
+  // Why the shape authority is `normalizeOpenInApplications` and not a zod object written here:
+  // that normalizer is the function that WRITES these rows in the first place — the store
+  // normalizes on load (`main/persistence.ts`) and `getClientSettings` seeds straight from the
+  // store. A schema that restates the shape can disagree with the producer, and did: it demanded
+  // that `command` be absent, while the normalizer always emits it (as `''` for a URL row), so
+  // every correctly-seeded workspace silently got no Open in entries at all. Reusing the producer
+  // makes that disagreement unrepresentable.
+  //
+  // Three properties come free from doing it this way, none of which need restating:
+  //  - the entry cap and id dedupe apply to seeds, which a raw schema skipped entirely;
+  //  - the normalizer builds each row explicitly, so it is an allowlist by construction — no
+  //    unknown field can cross, however new the runtime that sent it;
+  //  - an unrecognised key costs that key rather than its row, which is the degradation this
+  //    module's docstring promises for a newer runtime talking to an older client.
+  openInApplications: z
+    .array(z.unknown())
+    .transform((rows) => ({
+      requested: rows.length,
+      entries: normalizeOpenInApplications(rows).filter(isSeedableOpenInApplication)
+    }))
+    // Why a wholly unusable list fails instead of seeding []: "every row was rejected" is a
+    // broken seed, and the honest degrade for a broken seed is the key keeping its stock default
+    // — not the client silently losing its Open in menu.
+    .refine(({ requested, entries }) => requested === 0 || entries.length > 0)
+    .transform(({ entries }) => entries)
 } satisfies Partial<Record<keyof GlobalSettings, z.ZodTypeAny>>
 
 export type RuntimeSeededSettingKey = keyof typeof RUNTIME_SEEDED_SETTING_SCHEMA

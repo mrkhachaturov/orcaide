@@ -45,6 +45,44 @@ describe('normalizeOpenInApplications', () => {
     ])
   })
 
+  // Why these four: this normalizer guards the store on load AND on every settings write, so a
+  // rule here that requires `command` deletes browser-editor entries on the next launch rather
+  // than rejecting them visibly.
+  it('keeps a URL entry that has no command', () => {
+    expect(
+      normalizeOpenInApplications([
+        { id: 'code-server', label: 'code-server', url: 'https://cs.example.com/?folder={path}' }
+      ])
+    ).toEqual([
+      {
+        id: 'code-server',
+        label: 'code-server',
+        command: '',
+        url: 'https://cs.example.com/?folder={path}'
+      }
+    ])
+  })
+
+  it('preserves url on an entry that has both', () => {
+    expect(
+      normalizeOpenInApplications([
+        { id: 'x', label: 'X', command: 'code', url: 'https://e.com/?folder={path}' }
+      ])
+    ).toEqual([{ id: 'x', label: 'X', command: 'code', url: 'https://e.com/?folder={path}' }])
+  })
+
+  it('omits the url key entirely on a plain command entry', () => {
+    const [row] = normalizeOpenInApplications([{ id: 'x', label: 'X', command: 'code' }])
+    expect(Object.hasOwn(row, 'url')).toBe(false)
+  })
+
+  it('still drops an entry with neither command nor url', () => {
+    expect(normalizeOpenInApplications([{ id: 'x', label: 'X' }])).toEqual([])
+    expect(normalizeOpenInApplications([{ id: 'x', label: 'X', command: '  ', url: ' ' }])).toEqual(
+      []
+    )
+  })
+
   it('seeds defaults only when the persisted field is missing', () => {
     expect(normalizeOpenInApplications(undefined, { seedDefaults: true })).toEqual(
       DEFAULT_OPEN_IN_APPLICATIONS

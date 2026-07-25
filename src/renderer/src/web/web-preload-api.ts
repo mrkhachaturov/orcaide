@@ -81,6 +81,7 @@ import {
 } from '../../../shared/tui-agent-launch-defaults'
 import { normalizeAutoRenameBranchFromWorkDefaultOn } from '../../../shared/auto-rename-branch-from-work-settings'
 import { normalizeTerminalCursorStyleDefault } from '../../../shared/terminal-cursor-style-settings'
+import { pickRuntimeSeededSettings } from '../../../shared/runtime-seeded-settings'
 import { normalizeTerminalCustomThemes } from '../../../shared/terminal-custom-themes'
 import { normalizeUiLanguage } from '../../../shared/ui-language'
 import { normalizeUsagePercentageDisplay } from '../../../shared/usage-percentage-display'
@@ -3569,6 +3570,10 @@ function writeStoredSettings(
 }
 
 async function getRuntimeBackedStoredSettings(): Promise<GlobalSettings> {
+  // Why read this BEFORE getStoredSettings(): the first successful call below writes the blob,
+  // so "localStorage has no settings" is only ever true on a browser's very first visit. That
+  // is the one moment we let the workspace's store decide the starting look/feature set.
+  const isFirstVisit = window.localStorage.getItem(SETTINGS_STORAGE_KEY) === null
   const local = getStoredSettings()
   if (!requireActiveEnvironmentOrNull()) {
     return local
@@ -3597,6 +3602,13 @@ async function getRuntimeBackedStoredSettings(): Promise<GlobalSettings> {
       runtimeSettings.prBotAuthorOverrides = normalizePRBotAuthorOverrides(
         result.settings.prBotAuthorOverrides
       )
+    }
+    // Why only on a first visit: these are the workspace's DEFAULTS, not its policy. Seeding
+    // them once gives a provisioned workspace its declared appearance and feature set without
+    // anyone clicking through Settings; re-applying them on every load would silently undo the
+    // user's own choices, which stay in this browser and are never written back to the runtime.
+    if (isFirstVisit) {
+      Object.assign(runtimeSettings, pickRuntimeSeededSettings(result.settings))
     }
     const next = mergeSettings(local, runtimeSettings)
     writeStoredSettings(next)

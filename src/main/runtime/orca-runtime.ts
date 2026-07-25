@@ -169,6 +169,10 @@ import type {
   WorkspaceSessionState,
   DirEntry
 } from '../../shared/types'
+import {
+  pickRuntimeSeededSettings,
+  type RuntimeSeededSettingKey
+} from '../../shared/runtime-seeded-settings'
 import { assertWorktreeUnlockedForRemoval } from '../../shared/worktree-removal'
 import {
   LOCAL_EXECUTION_HOST_ID,
@@ -3093,12 +3097,17 @@ export class OrcaRuntimeService {
     | 'minimaxGroupId'
     | 'minimaxUsageModels'
     | 'prBotAuthorOverrides'
-  > {
+  > &
+    Partial<Pick<GlobalSettings, RuntimeSeededSettingKey>> {
     if (!this.store?.getSettings) {
       throw new Error('runtime_unavailable')
     }
     const settings = this.store.getSettings()
     return {
+      // Why: a web client has no settings of its own on first visit, so it seeds these from the
+      // workspace's store once and then owns them. Read-only here — the client never writes them
+      // back, which is what keeps "the workspace's default" from overriding "the user's choice".
+      ...pickRuntimeSeededSettings(settings),
       defaultTuiAgent: settings.defaultTuiAgent ?? null,
       disabledTuiAgents: settings.disabledTuiAgents ?? [],
       agentCmdOverrides: settings.agentCmdOverrides ?? {},

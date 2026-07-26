@@ -48,6 +48,7 @@ import {
   getExecutionHostIdForWorktree,
   getRuntimeEnvironmentIdForWorktree
 } from '@/lib/worktree-runtime-owner'
+import { getWebClientLocalFallbackEnvironmentId } from '@/lib/floating-workspace-runtime-owner'
 import {
   addAdditionalValidWorkspaceKeys,
   type WorkspaceSessionHydrationOptions
@@ -664,7 +665,13 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
       return
     }
     const defaultUrl = state.browserDefaultUrl ?? 'about:blank'
-    const runtimeEnvironmentId = getRuntimeEnvironmentIdForWorktree(state, worktreeId)
+    // Why: a client-local browser pane needs a <webview>, which the web client does not
+    // have — the chrome renders, the address bar accepts a URL, and nothing ever
+    // navigates because there is no page behind it. So in the web client an unresolved
+    // owner must still go to the runtime rather than fall through below.
+    const runtimeEnvironmentId =
+      getRuntimeEnvironmentIdForWorktree(state, worktreeId) ??
+      getWebClientLocalFallbackEnvironmentId(state)
     if (runtimeEnvironmentId) {
       const { createWebRuntimeSessionBrowserTab } = await import('@/runtime/web-runtime-session')
       try {

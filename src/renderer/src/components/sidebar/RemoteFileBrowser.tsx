@@ -27,6 +27,16 @@ type RemoteFileBrowserProps = (
   initialPath?: string
   onSelect: (path: string) => void
   onCancel: () => void
+  /**
+   * Opt in to picking a FILE with one of these extensions (lowercase, no dot) instead of
+   * a directory. Clicking a matching file selects it; directories still navigate. Omit —
+   * the default — and the browser behaves exactly as the "Add a project" flow needs it to.
+   *
+   * Why this exists: the web client has no native OS file dialog, so `Open Markdown Note`
+   * had nothing to open. This is the same host-fs browser patch 0006 used for Terminal
+   * Directory, taught the one thing it could not already do.
+   */
+  selectableFileExtensions?: readonly string[]
 }
 
 const FILE_HINT_MS = 2000
@@ -48,8 +58,17 @@ export function RemoteFileBrowser({
   runtimeEnvironmentId,
   initialPath = '~',
   onSelect,
-  onCancel
+  onCancel,
+  selectableFileExtensions
 }: RemoteFileBrowserProps): React.JSX.Element {
+  const fileMode = selectableFileExtensions !== undefined
+  const isSelectableFile = useCallback(
+    (name: string): boolean =>
+      selectableFileExtensions?.some((extension) =>
+        name.toLowerCase().endsWith(`.${extension.toLowerCase()}`)
+      ) === true,
+    [selectableFileExtensions]
+  )
   const [resolvedPath, setResolvedPath] = useState('')
   const [entries, setEntries] = useState<DirEntry[]>([])
   const [loading, setLoading] = useState(true)
@@ -443,12 +462,24 @@ export function RemoteFileBrowser({
         clickTimerRef.current = null
         if (entry.isDirectory) {
           navigate(joinPath(listParentPath, entry.name))
+        } else if (fileMode && isSelectableFile(entry.name)) {
+          // Why: in file mode the file IS the selection — no second confirm step, which
+          // is how a native open dialog behaves.
+          onSelect(joinPath(listParentPath, entry.name))
         } else {
           triggerFileHint()
         }
       }, 220)
     },
-    [navigate, triggerFileHint, listParentPath, preview?.loading]
+    [
+      navigate,
+      triggerFileHint,
+      listParentPath,
+      preview?.loading,
+      fileMode,
+      isSelectableFile,
+      onSelect
+    ]
   )
 
   const handleRowDoubleClick = useCallback(
@@ -727,26 +758,34 @@ export function RemoteFileBrowser({
         title={fileHint ? undefined : resolvedPath}
       >
         {fileHint
-          ? FILE_HINT_TEXT
-          : translate(
-              'auto.components.sidebar.RemoteFileBrowser.971d85cc84',
-              'Opens as a project on this host · {{value0}}',
-              { value0: resolvedPath }
-            )}
+          ? fileMode
+            ? `Pick a ${selectableFileExtensions?.map((ext) => `.${ext}`).join(' / ') ?? ''} file`
+            : FILE_HINT_TEXT
+          : fileMode
+            ? `Click a file to open it · ${resolvedPath}`
+            : translate(
+                'auto.components.sidebar.RemoteFileBrowser.971d85cc84',
+                'Opens as a project on this host · {{value0}}',
+                { value0: resolvedPath }
+              )}
       </p>
       <div className="flex items-center justify-end gap-2">
         <Button variant="outline" size="sm" className="h-7 text-xs" onClick={onCancel}>
           {translate('auto.components.sidebar.RemoteFileBrowser.f8b1deb1a4', 'Cancel')}
         </Button>
-        <Button
-          size="sm"
-          className="h-7 text-xs"
-          onClick={handleSelect}
-          disabled={selectDisabled}
-          title={resolvedPath}
-        >
-          {translate('auto.components.sidebar.RemoteFileBrowser.9e060f5815', 'Select folder')}
-        </Button>
+        {/* Why: in file mode the selection is the clicked file, so a "Select folder"
+            confirm would target the wrong thing entirely. */}
+        {fileMode ? null : (
+          <Button
+            size="sm"
+            className="h-7 text-xs"
+            onClick={handleSelect}
+            disabled={selectDisabled}
+            title={resolvedPath}
+          >
+            {translate('auto.components.sidebar.RemoteFileBrowser.9e060f5815', 'Select folder')}
+          </Button>
+        )}
       </div>
     </div>
   )

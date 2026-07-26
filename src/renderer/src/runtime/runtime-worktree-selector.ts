@@ -23,3 +23,18 @@ export function toRuntimeTerminalWorktreeSelector(worktreeId: string): string {
   }
   return toRuntimeWorktreeSelector(worktreeId)
 }
+
+/**
+ * Runtime selector for a browser tab's worktree id, or `undefined` for an unscoped page.
+ *
+ * The floating sentinel is terminal-only on the runtime: `resolveTerminalWorkspaceLaunchScope`
+ * answers it with the home dir, but `resolveWorktreeSelector` — which every other workspace
+ * API goes through, `browser.tabCreate` included — has no repo/worktree record to return and
+ * throws. `browser.tabCreate` already treats `worktree` as optional and backs an unscoped page
+ * with the offscreen WebContents, which is exactly what a floating browser wants.
+ */
+export function toRuntimeBrowserWorktreeSelector(worktreeId: string): string | undefined {
+  return worktreeId.trim() === FLOATING_TERMINAL_WORKTREE_ID
+    ? undefined
+    : toRuntimeWorktreeSelector(worktreeId)
+}

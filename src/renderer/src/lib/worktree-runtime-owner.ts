@@ -1,4 +1,9 @@
-import { getRepoExecutionHostId, parseExecutionHostId } from '../../../shared/execution-host'
+import {
+  LOCAL_EXECUTION_HOST_ID,
+  getRepoExecutionHostId,
+  parseExecutionHostId,
+  toRuntimeExecutionHostId
+} from '../../../shared/execution-host'
 import type { ExecutionHostId } from '../../../shared/execution-host'
 import type { GlobalSettings, Worktree } from '../../../shared/types'
 import { parseWorkspaceKey } from '../../../shared/workspace-scope'
@@ -11,6 +16,7 @@ import {
   resolveIndexedWorktreeOwner
 } from './worktree-runtime-owner-index'
 import { getSingleFocusedRuntimeEnvironmentId } from './single-runtime-legacy-owner'
+import { getFloatingWorkspaceRuntimeEnvironmentId } from './floating-workspace-runtime-owner'
 import {
   getExecutionHostIdForFolderWorkspace,
   getExplicitRuntimeEnvironmentIdForFolderWorkspace,
@@ -51,7 +57,11 @@ export function getRuntimeEnvironmentIdForWorktree(
     return null
   }
   if (worktreeId === FLOATING_TERMINAL_WORKTREE_ID) {
-    return null
+    // Why: local on the desktop app, the connected runtime in the web client — see
+    // floating-workspace-runtime-owner. Every floating surface routes through here:
+    // the pty transport (pty-connection), the browser (browser slice) and the
+    // setup/default-tab automations (launch-worktree-background-terminals).
+    return getFloatingWorkspaceRuntimeEnvironmentId(state)
   }
   const workspaceScope = parseWorkspaceKey(worktreeId)
   if (workspaceScope?.type === 'folder') {
@@ -149,7 +159,12 @@ export function getExecutionHostIdForWorktree(
     return 'local'
   }
   if (worktreeId === FLOATING_TERMINAL_WORKTREE_ID) {
-    return 'local'
+    const floatingEnvironmentId = getFloatingWorkspaceRuntimeEnvironmentId(state)
+    // Why: the execution host must agree with the runtime owner above, or the ConPTY
+    // heuristic in pty-connection treats a server-side pane as a local native PTY.
+    return floatingEnvironmentId
+      ? toRuntimeExecutionHostId(floatingEnvironmentId)
+      : LOCAL_EXECUTION_HOST_ID
   }
   const workspaceScope = parseWorkspaceKey(worktreeId)
   if (workspaceScope?.type === 'folder') {

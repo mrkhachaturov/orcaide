@@ -1,5 +1,6 @@
-import { parseExecutionHostId } from '../../../shared/execution-host'
+import { parseExecutionHostId, toRuntimeExecutionHostId } from '../../../shared/execution-host'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../shared/constants'
+import { getFloatingWorkspaceRuntimeEnvironmentId } from './floating-workspace-runtime-owner'
 import { parseWorkspaceKey } from '../../../shared/workspace-scope'
 import type { AppState } from '@/store/types'
 import {
@@ -52,9 +53,21 @@ export function captureEditorFileOperationProvenance(
       ? 'explicit'
       : 'legacy'
   const hintedRuntimeEnvironmentId = ownerHint?.trim() || null
+  const floatingRuntimeEnvironmentId =
+    worktreeId === FLOATING_TERMINAL_WORKTREE_ID
+      ? getFloatingWorkspaceRuntimeEnvironmentId(state)
+      : null
   const route =
     worktreeId === FLOATING_TERMINAL_WORKTREE_ID
-      ? { executionHostId: 'local' as const, runtimeEnvironmentId: null }
+      ? // Why: file operations must land on the host that actually holds the file.
+        // In the web client the floating workspace lives on the connected runtime,
+        // so pinning 'local' here sent reads/writes at a machine with no filesystem.
+        floatingRuntimeEnvironmentId
+        ? {
+            executionHostId: toRuntimeExecutionHostId(floatingRuntimeEnvironmentId),
+            runtimeEnvironmentId: floatingRuntimeEnvironmentId
+          }
+        : { executionHostId: 'local' as const, runtimeEnvironmentId: null }
       : explicitResolution.kind === 'resolved'
         ? explicitResolution.route
         : explicitResolution.kind === 'ambiguous'

@@ -33,7 +33,10 @@ import {
   withAgentSessionCreateOperationId
 } from './agent-session-create-operation'
 import { parseRemoteRuntimePtyId } from './runtime-terminal-stream'
-import { toRuntimeWorktreeSelector } from './runtime-worktree-selector'
+import {
+  toRuntimeBrowserWorktreeSelector,
+  toRuntimeWorktreeSelector
+} from './runtime-worktree-selector'
 import { recordWebSessionFocusIntent } from './web-session-focus-intent'
 import { clearWebSessionCloseIntent, recordWebSessionCloseIntent } from './web-session-close-intent'
 import {
@@ -416,7 +419,9 @@ export async function createWebRuntimeSessionBrowserTab(args: {
     const response = await callEnvironment({
       method: 'browser.tabCreate',
       params: {
-        worktree: toRuntimeWorktreeSelector(args.worktreeId),
+        // Why: `undefined` for the floating workspace — it has no worktree record on the
+        // runtime, and an unscoped offscreen page is what it wants anyway.
+        worktree: toRuntimeBrowserWorktreeSelector(args.worktreeId),
         url: args.url,
         profileId: args.profileId ?? undefined,
         // Why: user clicked "New Browser Tab", so mark it active in the snapshot, else the reconcile snaps back to a terminal.

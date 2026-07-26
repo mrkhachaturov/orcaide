@@ -316,6 +316,7 @@ import {
   sharesResolvedWorktreeLineageBoundary
 } from '../../shared/resolved-worktree-lineage'
 import { folderWorkspaceToWorktree } from '../../shared/folder-workspace-worktree'
+import { floatingWorkspaceToWorktree } from '../../shared/floating-workspace-worktree'
 import type {
   FolderWorkspacePathStatus,
   FolderWorkspacePathStatusRequest
@@ -771,6 +772,7 @@ import {
 import type { AddWorktreeOptions, AddWorktreeResult } from '../git/worktree'
 import { isENOENT } from '../ipc/filesystem-auth'
 import {
+  ensureDefaultFloatingWorkspacePath as ensureDefaultFloatingWorkspacePathOnHost,
   resolveFloatingTerminalCwd as resolveFloatingTerminalCwdOnHost,
   grantFloatingWorkspaceDirectory as grantFloatingWorkspaceDirectoryOnHost,
   type FloatingWorkspaceDirectoryStore
@@ -7173,6 +7175,19 @@ export class OrcaRuntimeService {
     worktree: ResolvedWorktree
     connectionId?: string
   }> {
+    // Why: the floating sentinel resolves only in resolveTerminalWorkspaceLaunchScope;
+    // resolveWorktreeSelector below searches real worktrees and answers
+    // 'selector_not_found'. A web client's floating markdown notes live on THIS host, so
+    // give file operations the app-owned floating workspace directory as their root —
+    // the same directory the desktop app:getFloatingMarkdownDirectory handler creates.
+    if (
+      worktreeSelector === FLOATING_TERMINAL_WORKTREE_ID ||
+      worktreeSelector === `id:${FLOATING_TERMINAL_WORKTREE_ID}`
+    ) {
+      const floatingPath = await ensureDefaultFloatingWorkspacePathOnHost()
+      return { worktree: this.toResolvedWorktree(floatingWorkspaceToWorktree(floatingPath)) }
+    }
+
     const folderScope = await this.resolveFolderWorkspaceLaunchScope(worktreeSelector)
     if (folderScope?.folderWorkspace) {
       return {
@@ -15225,6 +15240,12 @@ export class OrcaRuntimeService {
     await grantFloatingWorkspaceDirectoryOnHost(this.floatingWorkspaceDirectoryStore(), dirPath)
   }
 
+  // Why: same helper the desktop app:getFloatingMarkdownDirectory handler calls — it
+  // creates the app-owned floating workspace dir and authorizes just that path.
+  async ensureFloatingMarkdownDirectory(): Promise<string> {
+    return ensureDefaultFloatingWorkspacePathOnHost()
+  }
+
   async browseServerDir(pathValue: string): Promise<{ resolvedPath: string; entries: DirEntry[] }> {
     const dirPath = resolveServerBrowsePath(pathValue)
     const dirStat = await stat(dirPath)
@@ -21651,7 +21672,17 @@ export class OrcaRuntimeService {
         // Why: `orca serve` exposes the local runtime without a renderer
         // window. Renderer-backed Codex terminals are preferred for the app,
         // but headless CLI users still need a usable terminal handle.
-        (opts.rendererBacked === true && rendererWindow === null))
+        (opts.rendererBacked === true && rendererWindow === null) ||
+        // Why: focus is a REQUEST to reveal the pane, not proof a renderer
+        // exists to reveal it in. On a headless `orca serve` there is no
+        // window, so the renderer-IPC path below threw 'No renderer window
+        // available' and a web client asking for a focused agent terminal
+        // (quick-open Claude/Codex, "Launch in a new terminal") got nothing
+        // at all. Same answer the clause above gives renderer-backed headless
+        // callers: spawn in the background, then reveal through
+        // notifier.revealTerminalSession, which already honors
+        // presentation === 'focused' and degrades to a warning.
+        (requiresRendererFocus && availableAuthoritativeWindow === null))
 
     if (shouldCreateInBackground) {
       if (!this.ptyController?.spawn) {
@@ -24051,7 +24082,12 @@ export class OrcaRuntimeService {
   }
 
   private folderWorkspaceToResolvedWorktree(folderWorkspace: FolderWorkspace): ResolvedWorktree {
-    const worktree = folderWorkspaceToWorktree(folderWorkspace)
+    return this.toResolvedWorktree(folderWorkspaceToWorktree(folderWorkspace))
+  }
+
+  // Why: shared by the folder-workspace and floating-workspace paths — both present a
+  // plain directory as a worktree, with no lineage and no real git checkout behind it.
+  private toResolvedWorktree(worktree: Worktree): ResolvedWorktree {
     return {
       ...worktree,
       parentWorktreeId: null,

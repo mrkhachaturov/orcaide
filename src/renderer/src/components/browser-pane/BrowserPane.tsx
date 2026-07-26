@@ -156,7 +156,7 @@ import {
   RuntimeRpcCallError,
   type RuntimeClientTarget
 } from '@/runtime/runtime-rpc-client'
-import { toRuntimeWorktreeSelector } from '@/runtime/runtime-worktree-selector'
+import { toRuntimeBrowserWorktreeSelector } from '@/runtime/runtime-worktree-selector'
 import type {
   BrowserBackResult,
   BrowserGotoResult,
@@ -914,7 +914,13 @@ function RemoteBrowserPagePane({
   const isActiveRef = useRef(isActive)
   const currentBrowserTabIdRef = useRef(browserTab.id)
   const currentBrowserTabUrlRef = useRef(browserTab.url)
-  const runtimeWorktree = useMemo(() => toRuntimeWorktreeSelector(worktreeId), [worktreeId])
+  // Why: `undefined` for the floating workspace. Every browser RPC below carries this
+  // selector, and the floating sentinel has no worktree record on the runtime — it
+  // resolves only in resolveTerminalWorkspaceLaunchScope, so resolveWorktreeSelector
+  // answers 'selector_not_found'. The pane mounted (tabCreate already omits it) and
+  // then the screencast subscribe failed, which is the error shown inside the pane.
+  // `worktree` is OptionalString on every one of these schemas; absent means unscoped.
+  const runtimeWorktree = useMemo(() => toRuntimeBrowserWorktreeSelector(worktreeId), [worktreeId])
   const activeRuntimeEnvironmentIdRef = useRef<string | null>(activeRuntimeEnvironmentId)
   const startRemoteStreamRef = useRef<
     (pageId: string) => Promise<RemoteBrowserStreamSubscription | null>

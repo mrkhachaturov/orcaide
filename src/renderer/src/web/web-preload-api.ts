@@ -540,7 +540,18 @@ function createWebPreloadApi(): Partial<PreloadApi> {
         requireActiveEnvironmentOrNull()
           ? callRuntimeResult<string>('floatingWorkspace.resolveCwd', args).catch(() => '')
           : Promise.resolve(''),
-      getFloatingMarkdownDirectory: () => Promise.resolve(''),
+      // Why: '' is falsy, and the floating panel reads a falsy directory as "nowhere to
+      // put a note" and returns silently — New/Open Markdown Note did nothing at all in
+      // the tile. The notes live on the SERVER alongside its floating terminals, so ask
+      // the host for the same app-owned directory the desktop handler creates.
+      getFloatingMarkdownDirectory: () =>
+        requireActiveEnvironmentOrNull()
+          ? callRuntimeResult<{ path: string }>('floatingWorkspace.markdownDirectory', {})
+              .then((result) => result.path)
+              .catch(() => '')
+          : Promise.resolve(''),
+      // Why: the web tile has no native OS dialog — Open Markdown Note opens the in-app
+      // host-fs browser (RemoteFileBrowser) instead, exactly like Terminal Directory.
       pickFloatingMarkdownDocument: () => Promise.resolve(null),
       // Why: the web tile has no native OS dialog — the picker is the in-app
       // host-fs browser (RemoteFileBrowser), so this native entry stays a no-op.

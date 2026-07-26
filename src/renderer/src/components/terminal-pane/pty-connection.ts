@@ -236,6 +236,7 @@ import {
   getExecutionHostIdForWorktree,
   getSettingsForWorktreeRuntimeOwner
 } from '@/lib/worktree-runtime-owner'
+import { getWebClientLocalFallbackEnvironmentId } from '@/lib/floating-workspace-runtime-owner'
 import { CLIENT_PLATFORM } from '@/lib/new-workspace'
 import { buildAgentResumeStartupPlan } from '@/lib/tui-agent-startup'
 import { resolveAgentStatusTerminalTitle } from '@/lib/agent-status-terminal-title'
@@ -3230,6 +3231,7 @@ export function connectPanePty(
     : mirroredRuntimeEnvironmentId
       ? mirroredRuntimeEnvironmentId
       : null
+  const webClientLocalFallbackEnvironmentId = getWebClientLocalFallbackEnvironmentId(state)
   // Why: an SSH host nested under a HUB is execution identity, not permission for the paired client to dial that host.
   const connectionId =
     !terminalOwnerUnresolved && runtimeEnvironmentId === null
@@ -3521,7 +3523,15 @@ export function connectPanePty(
       )
     : runtimeEnvironmentId
       ? createRemoteRuntimePtyTransport(runtimeEnvironmentId, transportOptions)
-      : createIpcPtyTransport(transportOptions)
+      : // Why: the IPC fallback encodes "no named runtime, therefore the shell is on
+        // THIS machine" — true for a desktop app, never true for a web client, whose
+        // window.api.pty.spawn is a rejecting stub. Reaching it there is always a
+        // dead end, so address the runtime that served the page instead of throwing.
+        // Ownership should normally resolve before this; see
+        // getWebClientLocalFallbackEnvironmentId for why it sometimes does not.
+        (webClientLocalFallbackEnvironmentId
+          ? createRemoteRuntimePtyTransport(webClientLocalFallbackEnvironmentId, transportOptions)
+          : createIpcPtyTransport(transportOptions))
   const canSendDesktopQueryReply = (): boolean => {
     const ptyId = transport.getPtyId()
     return !ptyId || !isPtyLocked(ptyId)

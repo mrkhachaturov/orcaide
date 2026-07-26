@@ -28,6 +28,16 @@ export const FLOATING_WORKSPACE_METHODS: RpcMethod[] = [
     handler: async (params, { runtime }) => runtime.resolveFloatingTerminalCwd(params)
   }),
   defineMethod({
+    name: 'floatingWorkspace.markdownDirectory',
+    params: z.object({}),
+    // Why: mirrors the desktop `app:getFloatingMarkdownDirectory` handler 1:1. The web
+    // client stubs that call to '' — a falsy directory the floating panel reads as "no
+    // place to put a note", so New/Open Markdown Note silently did nothing.
+    handler: async (_params, { runtime }) => ({
+      path: await runtime.ensureFloatingMarkdownDirectory()
+    })
+  }),
+  defineMethod({
     name: 'floatingWorkspace.grantDirectory',
     params: GrantFloatingWorkspaceDirectoryParams,
     handler: async (params, { runtime }) => {

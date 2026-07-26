@@ -86,8 +86,13 @@ import {
 } from './floating-terminal-panel-bounds'
 import { translate } from '@/i18n/i18n'
 import { consumeFloatingTerminalOpenMaximizedIntent } from '@/lib/floating-terminal'
+import { RemoteFileBrowser } from '@/components/sidebar/RemoteFileBrowser'
+// Why: matches the desktop native picker's filter (src/main/ipc/app.ts).
+const FLOATING_MARKDOWN_EXTENSIONS = ['md', 'mdx', 'markdown'] as const
+import { resolveFloatingWorkspaceRuntimeEnvironmentId } from '@/lib/floating-workspace-runtime-owner'
+import { isWebClientLocation } from '@/lib/web-client-location'
+import { createWebRuntimeSessionBrowserTab } from '@/runtime/web-runtime-session'
 import { selectFloatingTerminalPanelInputs } from './floating-terminal-panel-inputs'
-const LOCAL_RUNTIME_SETTINGS = { activeRuntimeEnvironmentId: null } as const
 
 const EditorPanel = lazy(() => import('@/components/editor/EditorPanel'))
 
@@ -182,6 +187,18 @@ export function FloatingTerminalPanel({
   const openFile = useAppStore((s) => s.openFile)
   const browserDefaultUrl = useAppStore((s) => s.browserDefaultUrl)
   const floatingTerminalCwd = useAppStore((s) => s.settings?.floatingTerminalCwd ?? '')
+  // Why: null on the desktop app (the floating workspace is local by design), the connected
+  // runtime in the web client, where there is no local shell/webview/file dialog to own it.
+  const floatingRuntimeEnvironmentId = useAppStore((s) =>
+    resolveFloatingWorkspaceRuntimeEnvironmentId({
+      isWebClient: isWebClientLocation(),
+      activeRuntimeEnvironmentId: s.settings?.activeRuntimeEnvironmentId
+    })
+  )
+  const floatingRuntimeSettings = useMemo(
+    () => ({ activeRuntimeEnvironmentId: floatingRuntimeEnvironmentId }),
+    [floatingRuntimeEnvironmentId]
+  )
   const generatedTabTitlesEnabled = useAppStore((s) => s.settings?.tabAutoGenerateTitle === true)
   const newTerminalShortcut = useShortcutKeyDetails('tab.newTerminal')
   const newBrowserShortcut = useShortcutKeyDetails('tab.newBrowser')
@@ -191,6 +208,7 @@ export function FloatingTerminalPanel({
 
   const [cwd, setCwd] = useState<string | null>(null)
   const [markdownCwd, setMarkdownCwd] = useState<string | null>(null)
+  const [markdownBrowsing, setMarkdownBrowsing] = useState(false)
   const initialBoundsStateRef = useRef<FloatingTerminalPanelBoundsState | null>(null)
   if (initialBoundsStateRef.current === null) {
     initialBoundsStateRef.current = readInitialPanelBounds()
@@ -675,6 +693,20 @@ export function FloatingTerminalPanel({
 
   const createFloatingBrowserTab = useCallback(() => {
     const url = browserDefaultUrl ?? 'about:blank'
+    if (floatingRuntimeEnvironmentId) {
+      // Why: a client-local browser pane needs a <webview> the web client does not have, so
+      // back it with the runtime's offscreen WebContents — the same path a worktree browser
+      // takes. selectWorktree:false keeps the overlay from stealing the main window's
+      // selection; the local tab still lives under the floating workspace.
+      void createWebRuntimeSessionBrowserTab({
+        worktreeId: FLOATING_TERMINAL_WORKTREE_ID,
+        environmentId: floatingRuntimeEnvironmentId,
+        url,
+        targetGroupId: activeGroup?.id,
+        selectWorktree: false
+      })
+      return
+    }
     createBrowserTab(FLOATING_TERMINAL_WORKTREE_ID, url, {
       title: translate(
         'auto.components.floating.terminal.FloatingTerminalPanel.8b14ba6c17',
@@ -684,7 +716,7 @@ export function FloatingTerminalPanel({
       targetGroupId: activeGroup?.id,
       browserRuntimeEnvironmentId: null
     })
-  }, [activeGroup, browserDefaultUrl, createBrowserTab])
+  }, [activeGroup, browserDefaultUrl, createBrowserTab, floatingRuntimeEnvironmentId])
 
   const createFloatingMarkdownTab = useCallback(() => {
     if (!markdownCwd) {
@@ -696,7 +728,7 @@ export function FloatingTerminalPanel({
           markdownCwd,
           FLOATING_TERMINAL_WORKTREE_ID,
           getConnectionId(FLOATING_TERMINAL_WORKTREE_ID) ?? undefined,
-          LOCAL_RUNTIME_SETTINGS
+          floatingRuntimeSettings
         )
         if (!fileInfo) {
           return
@@ -704,15 +736,52 @@ export function FloatingTerminalPanel({
         openFile(fileInfo, {
           preview: false,
           targetGroupId: activeGroup?.id,
-          suppressActiveRuntimeFallback: true
+          // Why: same idiom as the file explorer and search — suppress the active-runtime
+          // fallback only when the owner really is local, so a web-client note keeps
+          // resolving against the runtime that holds the file.
+          suppressActiveRuntimeFallback: floatingRuntimeEnvironmentId === null
         })
       } catch (err) {
         toast.error(extractIpcErrorMessage(err, 'Failed to create untitled markdown file.'))
       }
     })()
-  }, [activeGroup, markdownCwd, openFile])
+  }, [activeGroup, floatingRuntimeSettings, markdownCwd, openFile])
+
+  // Why: the web client has no native OS file dialog, so route Open Markdown Note to the
+  // same host-fs browser the "Add a project" flow uses — in file mode. Desktop keeps its
+  // native picker, which already browses the real filesystem.
+  const openFloatingMarkdownFromHost = useCallback(
+    (filePath: string) => {
+      setMarkdownBrowsing(false)
+      const separator = filePath.includes('\\') && !filePath.includes('/') ? '\\' : '/'
+      const basename = filePath.split(separator).pop() || filePath
+      const root = markdownCwd ? `${markdownCwd.replace(/[/\\]$/, '')}${separator}` : null
+      // Mirrors markdownDocumentFromFilePath(..., { outsideRootRelativePath: 'basename' }).
+      const relativePath = root && filePath.startsWith(root) ? filePath.slice(root.length) : basename
+      openFile(
+        {
+          filePath,
+          relativePath,
+          worktreeId: FLOATING_TERMINAL_WORKTREE_ID,
+          language: detectLanguage(relativePath),
+          mode: 'edit',
+          runtimeEnvironmentId: floatingRuntimeEnvironmentId
+        },
+        {
+          preview: false,
+          targetGroupId: activeGroup?.id,
+          suppressActiveRuntimeFallback: floatingRuntimeEnvironmentId === null
+        }
+      )
+    },
+    [activeGroup, floatingRuntimeEnvironmentId, markdownCwd, openFile]
+  )
 
   const openFloatingMarkdownTab = useCallback(() => {
+    if (floatingRuntimeEnvironmentId) {
+      setMarkdownBrowsing(true)
+      return
+    }
     void (async () => {
       try {
         const document = await window.api.app.pickFloatingMarkdownDocument()
@@ -726,19 +795,19 @@ export function FloatingTerminalPanel({
             worktreeId: FLOATING_TERMINAL_WORKTREE_ID,
             language: detectLanguage(document.relativePath),
             mode: 'edit',
-            runtimeEnvironmentId: null
+            runtimeEnvironmentId: floatingRuntimeEnvironmentId
           },
           {
             preview: false,
             targetGroupId: activeGroup?.id,
-            suppressActiveRuntimeFallback: true
+            suppressActiveRuntimeFallback: floatingRuntimeEnvironmentId === null
           }
         )
       } catch (err) {
         toast.error(extractIpcErrorMessage(err, 'Failed to open markdown file.'))
       }
     })()
-  }, [activeGroup, openFile])
+  }, [activeGroup, floatingRuntimeEnvironmentId, openFile])
 
   const closeFloatingItems = useCallback(
     (visibleIds: string[]) => {
@@ -1535,6 +1604,18 @@ export function FloatingTerminalPanel({
                 if (!source) {
                   return
                 }
+                if (floatingRuntimeEnvironmentId) {
+                  // Why: a duplicate must land on the same host as its source, or the copy
+                  // opens a pane the web client cannot back.
+                  void createWebRuntimeSessionBrowserTab({
+                    worktreeId: FLOATING_TERMINAL_WORKTREE_ID,
+                    environmentId: floatingRuntimeEnvironmentId,
+                    url: source.url,
+                    targetGroupId: activeGroup?.id,
+                    selectWorktree: false
+                  })
+                  return
+                }
                 createBrowserTab(FLOATING_TERMINAL_WORKTREE_ID, source.url, {
                   ...buildDuplicatedBrowserTabOptions(source),
                   targetGroupId: activeGroup?.id,
@@ -1554,6 +1635,26 @@ export function FloatingTerminalPanel({
             onMinimize={() => onOpenChange(false)}
           />
         </div>
+
+        {floatingRuntimeEnvironmentId ? (
+          <Dialog open={markdownBrowsing} onOpenChange={setMarkdownBrowsing}>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Open Markdown Note</DialogTitle>
+                <DialogDescription>
+                  Pick a markdown file on this workspace host.
+                </DialogDescription>
+              </DialogHeader>
+              <RemoteFileBrowser
+                runtimeEnvironmentId={floatingRuntimeEnvironmentId}
+                initialPath={markdownCwd || '~'}
+                selectableFileExtensions={FLOATING_MARKDOWN_EXTENSIONS}
+                onSelect={openFloatingMarkdownFromHost}
+                onCancel={() => setMarkdownBrowsing(false)}
+              />
+            </DialogContent>
+          </Dialog>
+        ) : null}
 
         <div
           className="relative min-h-0 flex-1 overflow-hidden bg-background"

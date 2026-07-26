@@ -191,20 +191,27 @@ describe('mobile RPC allowlist', () => {
     // run on the host) may resolve/grant; a paired phone must not.
     const allowed = mobileRpcAllowlist()
     expect(
-      ['floatingWorkspace.resolveCwd', 'floatingWorkspace.grantDirectory'].filter((method) =>
-        allowed.has(method)
-      )
+      [
+        'floatingWorkspace.resolveCwd',
+        'floatingWorkspace.grantDirectory',
+        // Why: markdownDirectory creates the app-owned directory and authorizes it —
+        // a host mutation, so it joins the rest of the family in runtime scope only.
+        'floatingWorkspace.markdownDirectory'
+      ].filter((method) => allowed.has(method))
     ).toEqual([])
   })
 
   it('registers the runtime-only floating-workspace directory methods', () => {
     // Why: the web client routes the Terminal Directory picker + terminal cwd
     // through these; dropping one from ALL_RPC_METHODS silently reverts the
-    // picker to a no-op that never applies the chosen path.
+    // picker to a no-op that never applies the chosen path. markdownDirectory is
+    // the same story for New/Open Markdown Note, which fail silently without it.
     const registered = registeredRuntimeMethods()
-    const missing = ['floatingWorkspace.resolveCwd', 'floatingWorkspace.grantDirectory'].filter(
-      (method) => !registered.has(method)
-    )
+    const missing = [
+      'floatingWorkspace.resolveCwd',
+      'floatingWorkspace.grantDirectory',
+      'floatingWorkspace.markdownDirectory'
+    ].filter((method) => !registered.has(method))
     expect(missing).toEqual([])
   })
 })

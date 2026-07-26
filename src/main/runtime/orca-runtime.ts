@@ -1204,6 +1204,13 @@ type RuntimePtyWorktreeRecord = {
   tailWaitState?: TerminalTailWaitState
 }
 
+// Why: the PTY-record counterpart of isCursorAgentOrchestrationTarget — a
+// headless-served terminal has no leaf to read paneTitle from, so the same
+// decision is made from the titles the PTY record itself carries.
+function isCursorAgentOrchestrationPtyTarget(pty: RuntimePtyWorktreeRecord): boolean {
+  return [pty.lastOscTitle, pty.managementTitle, pty.title].some(isCursorAgentTitle)
+}
+
 type TerminalCreateOptions = {
   command?: string
   claudeAgentTeamsSourceCommand?: string
@@ -8211,6 +8218,13 @@ export class OrcaRuntimeService {
       ptyRecordChanged = prevTitle !== normalizedTitle || prevStatus !== agentStatus
       if (agentStatus === 'idle' && prevStatus !== 'idle') {
         this.resolvePtyTuiIdleWaiters(pty, ptyId)
+        // Why: the leaf loop below is the only other push-on-idle trigger, and it
+        // does not run when no renderer graph owns this PTY (headless serve / the
+        // web client's stubbed syncWindowGraph). Gating on that same emptiness is
+        // what keeps a desktop pane from being injected twice.
+        if (this.getLeavesForPty(ptyId).length === 0) {
+          this.deliverPendingMessagesForPty(pty)
+        }
       }
       const shouldDelayMobileSnapshot =
         ptyRecordChanged &&
@@ -10934,13 +10948,24 @@ export class OrcaRuntimeService {
       this.retireMobileSessionSurfacesForPty(ptyId, incarnationId, exactSurfaces)
     }
 
-    for (const leaf of this.getLeavesForPty(ptyId)) {
+    const exitedLeaves = this.getLeavesForPty(ptyId)
+    for (const leaf of exitedLeaves) {
       this.detachedPreAllocatedLeaves.delete(ptyId)
       leaf.connected = false
       leaf.writable = false
       leaf.lastExitCode = exitCode
       this.resolveExitWaiters(leaf)
       this.failActiveDispatchOnExit(leaf, exitCode)
+    }
+    if (exitedLeaves.length === 0) {
+      // Why: resolvePtyExitWaiters above already carries terminal waiters onto the
+      // PTY record for headless-served terminals; the dispatch/escalation half was
+      // still leaf-only, so a crashed agent in the web tile left its task stuck in
+      // 'dispatched' with the coordinator never told.
+      const handle = this.handleByPtyId.get(ptyId) ?? this.findHandleForPtyRecord(ptyId)
+      if (handle) {
+        this.failActiveDispatchForHandle(handle, exitCode)
+      }
     }
     this.pruneDisconnectedPtyRecords()
   }
@@ -12552,12 +12577,15 @@ export class OrcaRuntimeService {
   // next poll cycle. This catches agent crashes and unexpected exits within
   // milliseconds. The task is set back to 'pending' so it can be re-dispatched.
   private failActiveDispatchOnExit(leaf: RuntimeLeafRecord, exitCode: number): void {
-    if (!this._orchestrationDb) {
-      return
-    }
-
     const handle = this.handleByLeafKey.get(this.getLeafKey(leaf.tabId, leaf.leafId))
     if (!handle) {
+      return
+    }
+    this.failActiveDispatchForHandle(handle, exitCode)
+  }
+
+  private failActiveDispatchForHandle(handle: string, exitCode: number): void {
+    if (!this._orchestrationDb) {
       return
     }
 
@@ -26860,6 +26888,16 @@ export class OrcaRuntimeService {
 
   deliverPendingMessagesForHandle(handle: string): void {
     try {
+      // Why: same resolution order as sendTerminal — a runtime-owned PTY handle
+      // (headless serve, no renderer graph) resolves here; getLiveLeafForHandle
+      // would throw terminal_handle_stale and swallow the send-time push.
+      const livePty = this.getLivePtyForHandle(handle)
+      if (livePty) {
+        if (livePty.pty.lastAgentStatus === 'idle') {
+          this.deliverPendingMessagesForPty(livePty.pty)
+        }
+        return
+      }
       const { leaf } = this.getLiveLeafForHandle(handle)
       if (leaf.lastAgentStatus === 'idle') {
         this.deliverPendingMessages(leaf)
@@ -27441,12 +27479,43 @@ export class OrcaRuntimeService {
 
   // Why: push-on-idle delivery is event-driven (no polling) because the runtime owns both the message store and terminal status detection.
   private deliverPendingMessages(leaf: RuntimeLeafRecord): void {
-    if (!this._orchestrationDb) {
+    const handle = this.handleByLeafKey.get(this.getLeafKey(leaf.tabId, leaf.leafId))
+    if (!handle || !leaf.writable || !leaf.ptyId) {
       return
     }
 
-    const handle = this.handleByLeafKey.get(this.getLeafKey(leaf.tabId, leaf.leafId))
-    if (!handle) {
+    this.injectPendingMessages(handle, leaf.ptyId, {
+      isCursorAgentTarget: () => {
+        const tabTitle = this.tabs.get(leaf.tabId)?.title
+        return isCursorAgentOrchestrationTarget(leaf, tabTitle)
+      },
+      isStillWritable: () => leaf.writable
+    })
+  }
+
+  // Why: `orca serve` publishes an empty renderer graph (HEADLESS_RUNTIME_WINDOW_ID)
+  // and the web client's syncWindowGraph is a stub, so a browser-served terminal has
+  // a PTY record and a handle but never a leaf. Every write path already resolves
+  // getLivePtyForHandle before the leaf; push-on-idle was the one that did not, which
+  // is why orchestration in the Coder tile degraded to "go tell each agent to check".
+  private deliverPendingMessagesForPty(pty: RuntimePtyWorktreeRecord): void {
+    const handle = this.handleByPtyId.get(pty.ptyId) ?? this.findHandleForPtyRecord(pty.ptyId)
+    if (!handle || !pty.connected) {
+      return
+    }
+
+    this.injectPendingMessages(handle, pty.ptyId, {
+      isCursorAgentTarget: () => isCursorAgentOrchestrationPtyTarget(pty),
+      isStillWritable: () => pty.connected
+    })
+  }
+
+  private injectPendingMessages(
+    handle: string,
+    ptyId: string,
+    target: { isCursorAgentTarget: () => boolean; isStillWritable: () => boolean }
+  ): void {
+    if (!this._orchestrationDb) {
       return
     }
 
@@ -27455,12 +27524,8 @@ export class OrcaRuntimeService {
       return
     }
 
-    if (!leaf.writable || !leaf.ptyId) {
-      return
-    }
-
     const payload = formatMessagesForInjection(unread)
-    const wrote = this.ptyController?.write(leaf.ptyId, payload) ?? false
+    const wrote = this.ptyController?.write(ptyId, payload) ?? false
     if (!wrote) {
       return
     }
@@ -27471,8 +27536,7 @@ export class OrcaRuntimeService {
       return
     }
 
-    const tabTitle = this.tabs.get(leaf.tabId)?.title
-    if (isCursorAgentOrchestrationTarget(leaf, tabTitle)) {
+    if (target.isCursorAgentTarget()) {
       // Why: Cursor Agent treats injected PTY text as editable prompt input, so submitting must stay under user control.
       this._orchestrationDb.markAsDelivered(unread.map((m) => m.id))
       return
@@ -27480,10 +27544,9 @@ export class OrcaRuntimeService {
 
     // Why: Claude Code treats a large PTY write as a paste and swallows a \r in the same write; send Enter separately after a delay, stamping delivered_at only once \r is confirmed.
     // Important (design doc §3.2, feedback #2): stamp delivered_at, not read — read means "a check-caller consumed this"; flipping it would hide the message from check --unread.
-    const ptyId = leaf.ptyId
     setTimeout(() => {
       try {
-        if (!leaf.writable) {
+        if (!target.isStillWritable()) {
           return
         }
         const submitted = this.ptyController?.write(ptyId, '\r') ?? false

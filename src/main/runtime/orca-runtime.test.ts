@@ -856,6 +856,17 @@ function syncSinglePty(
   })
 }
 
+// Why: the shape `orca serve` produces — an explicitly empty renderer graph (the
+// web client's syncWindowGraph is a stub, so a browser never publishes one) plus a
+// live PTY carrying the agent's pre-allocated ORCA_TERMINAL_HANDLE. Terminal exists,
+// handle exists, leaf never does.
+function syncHeadlessPty(runtime: OrcaRuntimeService, ptyId = 'pty-1'): string {
+  runtime.syncWindowGraph(HEADLESS_RUNTIME_WINDOW_ID, { tabs: [], leaves: [] })
+  const handle = runtime.preAllocateHandleForPty(ptyId)
+  runtime.registerPty(ptyId, TEST_WORKTREE_ID)
+  return handle
+}
+
 function makeDeferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void
   const promise = new Promise<void>((next) => {
@@ -1060,6 +1071,34 @@ class InMemoryOrchestrationMessages {
         message.delivered_at = '1970-01-01 00:00:00'
       }
     }
+  }
+
+  private dispatches = new Map<string, { id: string; task_id: string; failed?: string }>()
+
+  setActiveDispatchForTerminal(handle: string, dispatch: { id: string; task_id: string }): void {
+    this.dispatches.set(handle, dispatch)
+  }
+
+  getActiveDispatchForTerminal(handle: string): { id: string; task_id: string } | null {
+    const dispatch = this.dispatches.get(handle)
+    return dispatch && !dispatch.failed ? dispatch : null
+  }
+
+  failDispatch(id: string, errorContext: string): void {
+    for (const dispatch of this.dispatches.values()) {
+      if (dispatch.id === id) {
+        dispatch.failed = errorContext
+      }
+    }
+  }
+
+  getFailedDispatchContext(id: string): string | null {
+    for (const dispatch of this.dispatches.values()) {
+      if (dispatch.id === id) {
+        return dispatch.failed ?? null
+      }
+    }
+    return null
   }
 
   close(): void {}
@@ -16039,6 +16078,126 @@ describe('OrcaRuntimeService', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('pushes orchestration messages on idle to a headless-served terminal with no leaf', async () => {
+    vi.useFakeTimers()
+    try {
+      const runtime = new OrcaRuntimeService(store)
+      const db = new InMemoryOrchestrationMessages()
+      const write = vi.fn().mockReturnValue(true)
+      setInMemoryOrchestrationMessages(runtime, db)
+      runtime.setPtyController({
+        write,
+        kill: vi.fn(),
+        getForegroundProcess: async () => null
+      })
+      const handle = syncHeadlessPty(runtime)
+      db.insertMessage({ from: 'term_sender', to: handle, subject: 'ping to the active session' })
+
+      // The idle transition is the whole trigger: before the fix it only ran the
+      // leaf loop, which is empty under `orca serve`, so nothing was ever written.
+      runtime.onPtyData('pty-1', '\x1b]0;Codex working\x07', 100)
+      runtime.onPtyData('pty-1', '\x1b]0;Codex done\x07', 101)
+
+      expect(write).toHaveBeenCalledWith(
+        'pty-1',
+        expect.stringContaining('Subject: ping to the active session')
+      )
+      await vi.advanceTimersByTimeAsync(500)
+      expect(write).toHaveBeenCalledWith('pty-1', '\r')
+
+      const unread = db.getUnreadMessages(handle)
+      expect(unread).toHaveLength(1)
+      expect(unread[0].read).toBe(0)
+      expect(unread[0].delivered_at).not.toBeNull()
+      db.close()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('pushes to an already-idle headless terminal at send time', async () => {
+    vi.useFakeTimers()
+    try {
+      const runtime = new OrcaRuntimeService(store)
+      const db = new InMemoryOrchestrationMessages()
+      const write = vi.fn().mockReturnValue(true)
+      setInMemoryOrchestrationMessages(runtime, db)
+      runtime.setPtyController({
+        write,
+        kill: vi.fn(),
+        getForegroundProcess: async () => null
+      })
+      const handle = syncHeadlessPty(runtime)
+      runtime.onPtyData('pty-1', '\x1b]0;Codex working\x07', 100)
+      runtime.onPtyData('pty-1', '\x1b]0;Codex done\x07', 101)
+      db.insertMessage({ from: 'term_sender', to: handle, subject: 'hello' })
+
+      // orchestration.send calls this directly; it resolved via getLiveLeafForHandle,
+      // which throws terminal_handle_stale with no graph and swallowed the push.
+      runtime.deliverPendingMessagesForHandle(handle)
+
+      expect(write).toHaveBeenCalledWith('pty-1', expect.stringContaining('Subject: hello'))
+      await vi.advanceTimersByTimeAsync(500)
+      expect(write).toHaveBeenCalledWith('pty-1', '\r')
+      db.close()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('injects a leaf-backed terminal exactly once when a PTY record also exists', async () => {
+    vi.useFakeTimers()
+    try {
+      const runtime = new OrcaRuntimeService(store)
+      const db = new InMemoryOrchestrationMessages()
+      const write = vi.fn().mockReturnValue(true)
+      setInMemoryOrchestrationMessages(runtime, db)
+      runtime.setPtyController({
+        write,
+        kill: vi.fn(),
+        getForegroundProcess: async () => null
+      })
+      // Desktop shape: the agent's pre-allocated handle gives the PTY a handleByPtyId
+      // entry AND the renderer publishes a leaf that adopts it. Both delivery paths
+      // resolve the same handle, so the PTY path must stand down.
+      runtime.preAllocateHandleForPty('pty-1')
+      syncSinglePty(runtime)
+
+      const [terminal] = (await runtime.listTerminals()).terminals
+      db.insertMessage({ from: 'term_sender', to: terminal.handle, subject: 'once only' })
+      runtime.onPtyData('pty-1', '\x1b]0;Codex working\x07', 100)
+      runtime.onPtyData('pty-1', '\x1b]0;Codex done\x07', 101)
+      await vi.advanceTimersByTimeAsync(500)
+
+      const injections = write.mock.calls.filter(
+        (c) => typeof c[1] === 'string' && c[1].includes('Subject: once only')
+      ).length
+      expect(injections).toBe(1)
+      db.close()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('fails the active dispatch when a headless-served agent PTY exits', () => {
+    const runtime = new OrcaRuntimeService(store)
+    const db = new InMemoryOrchestrationMessages()
+    setInMemoryOrchestrationMessages(runtime, db)
+    const handle = syncHeadlessPty(runtime)
+    db.setActiveDispatchForTerminal(handle, { id: 'dispatch-1', task_id: 'task-1' })
+    db.setActiveCoordinatorRun({ coordinator_handle: 'term_coordinator' })
+
+    runtime.onPtyExit('pty-1', 3)
+
+    // Before the fix this was leaf-only, so a crashed agent in the tile left its
+    // task 'dispatched' forever and the coordinator was never told.
+    expect(db.getFailedDispatchContext('dispatch-1')).toBe('Agent exited with code 3')
+    const escalations = db.getUnreadMessages('term_coordinator')
+    expect(escalations).toHaveLength(1)
+    expect(escalations[0].type).toBe('escalation')
+    db.close()
   })
 
   it('adopts preallocated ORCA_TERMINAL_HANDLE as a valid runtime handle', async () => {
